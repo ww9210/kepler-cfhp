@@ -127,7 +127,7 @@ class BloomGadgetMixin:
             print '[+] '+str(loop_idx)+' step()'
             #self.debug_simgr(simgr)
             try:
-                simgr.step()
+                simgr.step(stash='active')
                 print 'inspecting simgr...'
                 print simgr.active
                 simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bad_rip)
@@ -176,12 +176,16 @@ class BloomGadgetMixin:
                                 print 'perfect blooming! %s' % (self.current_bloom_gadget[1])
                                 seen_bloom_state = True
                                 print bloomed_regs
+                            else:  # not perfect blooming
+                                continue
                         else:
                             #if number_of_bloomed_regs >= 3:
                             if number_of_bloomed_regs >= 4:
                                 self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
                                 seen_bloom_state = True
                                 print 'blooming: %s!!!' % (self.current_bloom_gadget[1])
+                            else:
+                                continue
                     elif bloom_site in self.b.factory.block(second_to_last_history).instruction_addrs or \
                             bloom_site in self.b.factory.block(third_to_last_history).instruction_addrs:
                         # if the unconstrained state is generated from the bloom_site and a call stub
@@ -262,7 +266,7 @@ class BloomGadgetMixin:
         iterate over all blooming gadget and try to find the good blooming state
         :return: good_bloom_gadget containing the bloom state
         """
-        initial_state = self.get_initial_state(switch_cpu=True)
+        initial_state = self.get_initial_state(switch_cpu=True, control_memory_base=self.controlled_memory_base)
         total = len(self.bloom_gadgets)
         for i, bloom_gadget in enumerate(self.bloom_gadgets):
             print '[+] ===== checking %d/%d th bloom gadget... =====' % (i, total)

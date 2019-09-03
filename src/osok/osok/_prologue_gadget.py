@@ -58,7 +58,7 @@ class PrologueGadgetMixin:
         if state.regs.rip.symbolic:
             print 'trying to extract signature at prologue indirect jump to copy_from_user'
             print colorama.Fore.RED +'jmp instruction at:', hex(state.history.addr) + colorama.Style.RESET_ALL
-            self.dump_reg(state)
+            # self.dump_reg(state)
             print(colorama.Fore.RED + '[+] extracting runtime data flow signature for pairing with disclosure gadget'
                   + colorama.Style.RESET_ALL)
             data_signatures = self.extract_prologue_call_site_signature(state)
@@ -80,7 +80,7 @@ class PrologueGadgetMixin:
         if state.regs.rip.symbolic:
             print 'trying to extract signature at prologue indirect call to copy_from_user'
             print 'Call target address :', state.inspect.function_address
-            self.dump_reg(state)  # dump registers for debug purpose
+            # self.dump_reg(state)  # dump registers for debug purpose
             print(colorama.Fore.RED + '[+] extracting runtime data flow signature for pairing with disclosure gadget'
                   + colorama.Style.RESET_ALL)
             data_signatures = self.extract_prologue_call_site_signature(state)
@@ -195,7 +195,7 @@ class PrologueGadgetMixin:
         state.inspect.b('call', when=angr.BP_BEFORE, instruction=disclosure_site
                         , action=self.disclosure_site_callback)
         # state.inspect.remove_breakpoint("call", self.first_fork_site_bp)
-        state.inspect.b('mem_read', when=angr.BP_BEFORE, action=self.track_reads)
+        #state.inspect.b('mem_read', when=angr.BP_BEFORE, action=self.track_reads)
         state.inspect.b('instruction', when=angr.BP_BEFORE, instruction=prologue_entry
                         , action=self.enter_prologue_callback)
         # state.inspect.b('address_concretization', when=angr.BP_BEFORE, instruction = first_fork_site,

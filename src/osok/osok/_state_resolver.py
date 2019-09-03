@@ -54,7 +54,8 @@ class StateResolverMixin:
                     if self.reproduce_mode:
                         pass
                     else:
-                        print 'same content for cle and qemu at page %x, skip' % addr
+                        #print 'same content for cle and qemu at page %x, skip' % addr
+                        pass
             else:
                 raw_input('failed to get_a_page')
         print 'Finished fixing section:', name

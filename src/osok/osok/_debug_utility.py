@@ -75,8 +75,12 @@ class DebugUtilityMixin:
         bar = str(ts)+'\n'
         bar += str(cur) + '/' + str(total_len) + '\n'
         bar += percent * '=' + (100-percent)*'-' + '\n'
+        if self.lock is not None:
+            self.lock.acquire()
         with open(filename, 'a') as f:
             f.write(bar)
+        if self.lock is not None:
+            self.lock.release()
         return True
 
     def is_port_in_use(self, port_number):

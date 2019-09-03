@@ -17,10 +17,12 @@ import pickle
 import os
 from os import listdir
 from os.path import isfile, join
+from multiprocessing import Lock
 import state_filters
 import _concrete_state
 import _pickle_states
 import _gadget_analysis
+import _relay_gadget
 import _bloom_gadget
 import _disclosure_gadget
 import _forking_gadget
@@ -38,6 +40,7 @@ import _exploit_generation
 class OneShotExploit(object, _concrete_state.ConcreteStateMixin
                      , _pickle_states.PickleStatesMixin
                      , _gadget_analysis.GadgetAnalysisMixin
+                     , _relay_gadget.RelayGadgetMixin
                      , _bloom_gadget.BloomGadgetMixin
                      , _forking_gadget.ForkingGadgetMixin
                      , _prologue_gadget.PrologueGadgetMixin
@@ -51,10 +54,16 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin
                      , _payload_generation.PayloadGenerationMixin
                      , _exploit_generation.ExploitGenererationMixin
                      ):
-    def __init__(self, kernel_path=None):
+    def __init__(self, l=None, q=None, kernel_path=None):
         """
         :param kernel_path: the vmlinux path to the kernel
         """
+        if l is not None:
+            self.lock = l  # this is the lock because all instances of osok share a qemu instance
+        else:
+            self.lock = None
+        self.queue = q
+
         self.kernel_path = kernel_path
         if os.path.isfile('angr_project.cache'):
             with open('angr_project.cache','rb') as f:
@@ -216,8 +225,11 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin
         assert tmpbb.size <= 5
         return tmpbb.size
 
-    def is_stack_address(self, addr):
+    def is_stack_address(self, state, addr):
+        rsp = state.se.eval(state.regs.rsp)
         if (addr & 0xffffc90000000000) == 0xffffc90000000000:
+            return True
+        elif abs(rsp-addr) < 0x2000:
             return True
         else:
             return False
@@ -239,5 +251,5 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin
         else:
             state.memory.read_strategies.insert(0,
                 concretization_strategies.controlled_data.SimConcretizationStrategyControlledData(
-                    1, [0xffff880066800000]))
+                    1, [self.controlled_memory_base]))
         return

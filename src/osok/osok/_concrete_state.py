@@ -41,7 +41,7 @@ class ConcreteStateMixin:
         tmp_r.close()
 
     def get_initial_state(self
-                          , control_memory_base=0xffff880066800000
+                          , control_memory_base=None
                           , control_memory_size=0x1000
                           , switch_cpu=True
                           , extra_options=None
@@ -55,6 +55,10 @@ class ConcreteStateMixin:
         :return:
         """
         start_addr = self.start_addr
+
+        if control_memory_base is None:
+            print 'do you control any memory region?'
+            assert 0
 
         extras = {angr.options.REVERSE_MEMORY_NAME_MAP, \
               angr.options.TRACK_ACTION_HISTORY, \
@@ -74,6 +78,8 @@ class ConcreteStateMixin:
 
         if self.debug_qemu_backend:
             print 'connecting to qemu console'
+            if self.lock is not None:
+                self.lock.acquire()
             self.r = pwnlib.tubes.remote.remote('127.0.0.1', self.qemu_port)
             self.install_context(s)
             self.install_gs(s)  # install the gs
@@ -109,6 +115,7 @@ class ConcreteStateMixin:
         self.start_time_of_symbolic_execution = time.time()
 
         s = self.install_context(s)
+        print 'loading concrete memory'
         self.fix_a_section(s, '.text')
         self.install_section(s, '.data')
         self.install_section(s, '.bss')
@@ -116,7 +123,21 @@ class ConcreteStateMixin:
         self.install_extra_module(s)  # install the vulnerable module
         self.install_stack(s)  # install the stack
         self.install_gs(s)  # install the gs
+
+        # try concretizing some memory
+        phsymap_to_concretize = [control_memory_base, control_memory_base+0x1000, control_memory_base-0x1000]
+        for addr in phsymap_to_concretize:
+            con = self.statebroker.get_a_page(self.r, addr)
+            if con is not None:
+                self.set_concret_memory_region(s, addr, con, 4096)
+            else:
+                print 'wtf'
+                assert 0
+
+        # close the qemu console connect here
         self.r.close()
+        if self.lock is not None:
+            self.lock.release()
 
         # setting symbolic memory
         self.physmap_bytes = []
@@ -249,9 +270,11 @@ class ConcreteStateMixin:
         b = self.b
         sol = self.sol
         # print '='*78
-        # print 'Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address,\
-        #                                'Size', state.inspect.mem_read_length
-        if type(state.inspect.mem_read_address) != long:
+        #print 'Read', state.inspect.mem_read_expr, 'from', state.inspect.mem_read_address,\
+        #'Size', state.inspect.mem_read_length
+        if type(state.inspect.mem_read_address) == long:
+            print state.inspect.mem_read_address, 'is long type'
+        else:
             try:
                 if self.debug_irsb:
                     # irsb = b.factory.block(state.addr).vex
@@ -263,7 +286,13 @@ class ConcreteStateMixin:
                 # print 'uninit: ', state.inspect.mem_read_address.uninitialized,\
                 # 'symbolic:', state.inspect.mem_read_address.symbolic
                 if state.inspect.mem_read_address.symbolic:
-                    # print 'read from symbolic address, primitive found!'
+                    if state.inspect.mem_read_expr is None and self.reproduce_mode:
+                        print 'adding constraint to', state.inspect.mem_read_address
+                        print hex(state.addr)
+                        state.add_constraints(state.inspect.mem_read_address > self.controlled_memory_base-1)
+                        state.add_constraints(state.inspect.mem_read_address < self.controlled_memory_base+0x1000)
+                    #print 'read from symbolic address, primitive found!'
+                    #embed()
                     if self.pause_on_read_from_symbolic_address:
                         raw_input('wtf read from symbolic address')
                 # print 'checking whether memory is uninitialized...'
@@ -283,26 +312,32 @@ class ConcreteStateMixin:
                     if self.resolve_uninit:
                         r = None
                         try:
+                            print 'waiting for the lock...'
+                            if self.lock is not None:
+                                self.lock.acquire()
                             r = remote('127.0.0.1', self.qemu_port)
                         except PwnlibException as e:
                             print e
-                            print 'fail to connect to vm, try restarting'
-                            print 'sleeping 30 seconds'
-                            sleep(30)
-                            self.vm.run(test_connection=False)
-                            self.load_qemu_snapshot()
-                            sleep(5)
-                            r = remote('127.0.0.1', self.qemu_port)
+                            print 'we are in trouble...'
+                            print 'wtf, why my vm is dead...'
+                            if self.lock is not None:
+                                self.lock.release()
+                            sleep(60)
+                            return
                         try:
                             addr = self.sol.eval(state.inspect.mem_read_address.get_bytes(0, 8), 1)[0]
-                            if self.controlled_memory_base <= addr < (self.controlled_memory_base +
-                                                                      self.controlled_memory_size):
+                            if (self.controlled_memory_base-self.controlled_memory_size) <= addr < (self.controlled_memory_base +
+                                                                      2* self.controlled_memory_size):
                                 r.close()
+                                if self.lock is not None:
+                                    self.lock.release()
                                 pass
                             else:
                                 print '[+] resolving a page containing the address:', hex(addr)
                                 con = self.statebroker.get_a_page(r, addr)
                                 r.close()
+                                if self.lock is not None:
+                                    self.lock.release()
                                 if con is not None:  # success memory resolving
                                     self.set_concret_memory_region(state, addr, con, 4096)
                                     print '[+] resolved the uninit with concrete page'
@@ -322,6 +357,8 @@ class ConcreteStateMixin:
                             traceback.print_exc()
                             if r is not None:
                                 r.close()
+                                if self.lock is not None:
+                                    self.lock.release()
                             print 'failed in resolving, we do not handle here~'
                             pass
                 else:

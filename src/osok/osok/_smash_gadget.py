@@ -90,9 +90,9 @@ class SmashGadgetMixin:
             print '[+] ' + str(loop_idx) + ' step()'
             try:
                 print '[+] stepping'
-                simgr.step()
-                print simgr.active
-                print '[+] removing state with bad rip to deadended stash'
+                simgr.step(stash='active')
+                #print simgr.active
+                #print '[+] removing state with bad rip to deadended stash'
                 simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bad_rip)
                 for deadend_state in simgr.deadended:
                     simgr.deadended.remove(deadend_state)
@@ -108,10 +108,10 @@ class SmashGadgetMixin:
 
             # has unconstrained states
             if simgr.unconstrained:
-                print 'has unconstrained state..'
+                #print 'has unconstrained state..'
                 for ucstate in simgr.unconstrained:
-                    print 'inspect the unconstrained state', ucstate
-                    print 'appending unconstrained state to candidate states'
+                    #print 'inspect the unconstrained state', ucstate
+                    #print 'appending unconstrained state to candidate states'
                     # embed()
                     candidate_states.append(ucstate.copy())
                     if target_fork_site in self.b.factory.block(ucstate.history.addr).instruction_addrs:
@@ -119,12 +119,12 @@ class SmashGadgetMixin:
                     simgr.unconstrained.remove(ucstate)
                     # import IPython; IPython.embed()
             if loop_idx > 7:
-                print 'too many steps...aborting...'
+                #print 'too many steps...aborting...'
                 del simgr
                 break
 
             if reach_target_fork_site:  # already the target fork site
-                print 'already reach target fork site, stop exploring'
+                #print 'already reach target fork site, stop exploring'
                 del simgr
                 break
 
@@ -140,7 +140,7 @@ class SmashGadgetMixin:
         print 'evaluating smash state...'
         #self.debug_state(state)
         # check if rdi is stack location
-        if self.is_stack_address(state.se.eval(state.regs.rdi)):
+        if self.is_stack_address(state, state.se.eval(state.regs.rdi)):
             print '[+] rdi points to stack'
             # check if rsi is user space location
             state.add_constraints(state.regs.rsi < 0x7fff00000000)
@@ -249,6 +249,7 @@ class SmashGadgetMixin:
                 # try payload generation
                 print '[+] try generating payload...'
                 success = self.gen_payload_smap_smep_bypass(active_state)
+                del active_state
                 if success:
                     break
                 # embed()

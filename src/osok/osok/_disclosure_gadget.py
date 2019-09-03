@@ -92,7 +92,7 @@ class DisclosureGadgetMixin:
             print 'rsi is symbolic, it is not good because we need rsi points to stack...'
             state.osokplugin.should_get_killed = True
         else:
-            if self.is_stack_address(state.se.eval(state.regs.rsi)):
+            if self.is_stack_address(state, state.se.eval(state.regs.rsi)):
                 print colorama.Fore.YELLOW + 'rsi points to stack, sounds good, needs further check'\
                       + colorama.Style.RESET_ALL
                 # checking if current state satisfy disclosure requirement

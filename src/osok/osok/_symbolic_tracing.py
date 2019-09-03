@@ -95,6 +95,10 @@ class SymbolicTracingMixin:
             print 'apply first constraint func to bloom entry:', hex(bloom_entry)
             first_constraint_func(state, bloom_entry)
 
+        # instrument memory read and writes
+        state.inspect.b('mem_read', when=angr.BP_BEFORE, action=self.track_reads)
+        state.inspect.b('mem_write', when=angr.BP_BEFORE, action=self.track_writes)
+
         if self.use_controlled_data_concretization:
             self.add_concretization_strategy_controlled_data(state)
 

@@ -151,8 +151,10 @@ class ForkingGadgetMixin:
 
         # add instrumentation via breakpoint
         # TODO handle indirect jump such as call rdx
-        state.inspect.b('mem_read', when=angr.BP_BEFORE, action=self.track_reads)
-        state.inspect.b('mem_write', when=angr.BP_BEFORE, action=self.track_writes)
+
+        #state.inspect.b('mem_read', when=angr.BP_BEFORE, action=self.track_reads)
+        #state.inspect.b('mem_write', when=angr.BP_BEFORE, action=self.track_writes)
+
         state.inspect.b('instruction', when=angr.BP_BEFORE, instruction=fork_entry, action=self.enter_fork_callback)
         # we want to first verify if we can reach both of the forking site,
         # so we should zero out both of the call stubs
@@ -206,7 +208,7 @@ class ForkingGadgetMixin:
         #loop_idx = 0
         while True:
             print '[+] ' + str(self.loop_idx_forking_stage) + ' step()'
-            self.debug_simgr(simgr)
+            #self.debug_simgr(simgr)
             try:
                 print 'purge deadend state'
                 simgr.stashes['deadended'] = []

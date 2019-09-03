@@ -12,7 +12,7 @@ def filter_bad_rip(somestate):
         if somestate.regs.rip.symbolic:
             return False
         ip = somestate.solver.eval_upto(somestate.ip, 1)[0]
-        if 0xffff880066800000 < ip < 0xffff880066900000:
+        if ip < 0xffffffff81000000:
             return True
         if ip < 0x7fffffffffff:
             return True
