@@ -24,10 +24,10 @@ class DebugUtilityMixin:
             addr_to_print = current_rsp
             for i in range(size_in_qword):
                 value = state.se.eval(state.memory.load(addr_to_print, 8).reversed)
-                print hex(value)
+                print(hex(value))
                 addr_to_print += 8
         except all as e:
-            print e
+            print(e)
             traceback.print_exc()
             embed()
 
@@ -35,7 +35,7 @@ class DebugUtilityMixin:
 
     def debug_state(self, state, save_memory=True):
         b = self.b
-        print '*** debugging info of state:', state, '***'
+        print('*** debugging info of state:', state, '***')
         try:
             if not save_memory:
                 irsb = b.factory.block(state.addr).vex
@@ -44,28 +44,28 @@ class DebugUtilityMixin:
                 cap.pp()
             self.dump_reg(state)
         except angr.errors.SimEngineError as e:
-            print e.args, e.message
-            print 'angr.errors.SimEngineError'
+            print(e.args, e.message)
+            print('angr.errors.SimEngineError')
             pass
         return
 
     def dump_reg(self, state):
-        print 'rax:', state.regs.rax, 'r8', state.regs.r8
-        print 'rbx:', state.regs.rbx, 'r9', state.regs.r9
-        print 'rcx:', state.regs.rcx, 'r10', state.regs.r10
-        print 'rdx:', state.regs.rdx, 'r11', state.regs.r11
-        print 'rsi:', state.regs.rsi, 'r12', state.regs.r12
-        print 'rdi:', state.regs.rdi, 'r13', state.regs.r13
-        print 'rsp:', state.regs.rsp, 'r14', state.regs.r14
-        print 'rbp:', state.regs.rbp, 'r15', state.regs.r15
-        print 'gs:', state.regs.gs
+        print('rax:', state.regs.rax, 'r8', state.regs.r8)
+        print('rbx:', state.regs.rbx, 'r9', state.regs.r9)
+        print('rcx:', state.regs.rcx, 'r10', state.regs.r10)
+        print('rdx:', state.regs.rdx, 'r11', state.regs.r11)
+        print('rsi:', state.regs.rsi, 'r12', state.regs.r12)
+        print('rdi:', state.regs.rdi, 'r13', state.regs.r13)
+        print('rsp:', state.regs.rsp, 'r14', state.regs.r14)
+        print('rbp:', state.regs.rbp, 'r15', state.regs.r15)
+        print('gs:', state.regs.gs)
         return
 
     def debug_simgr(self, simgr, save_memory=True):
-        print 'there are %d active states of this simgr:' % len(simgr.active)
+        print('there are %d active states of this simgr:' % len(simgr.active))
         if not save_memory:
             for i, state in enumerate(simgr.stashes['active']):
-                print "%dth state:" % i, state
+                print("%dth state:" % i, state)
                 self.debug_state(state, save_memory)
         return
 

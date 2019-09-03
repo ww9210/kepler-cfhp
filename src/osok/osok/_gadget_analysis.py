@@ -1,5 +1,6 @@
 from pwn import *
 import pickle
+from IPython import embed
 
 #==========types of lea instruction, enumeration=============
 LEA_MEM_TO_REG=21
@@ -37,15 +38,17 @@ class GadgetAnalysisMixin:
                     if fake_stack_gadget[3] == disclosure_gadget[2] and fake_stack_gadget[3] != '':
                         # if fake_stack_gadget[3] == 'rsp' and fake_stack_gadget[4] < disclosure_gadget[1] \
                                 #and (fake_stack_gadget[4] - disclosure_gadget[1]) == -8:
-                        if fake_stack_gadget[3] == 'rsp' and fake_stack_gadget[4] == disclosure_gadget[1] - 8 \
+                        if fake_stack_gadget[3].decode('utf-8') == 'rsp' and fake_stack_gadget[4] == disclosure_gadget[1] - 8 \
                                 and fake_stack_gadget[2] == disclosure_gadget[0]:
                                 res.append([fake_stack_gadget, disclosure_gadget])
                         if self.consider_rbp_disclosure_prologue_pair:  # consider rbp disclosure prologue pair
-                            if fake_stack_gadget[3] == 'rbp' and fake_stack_gadget[4] == disclosure_gadget[1]:
+                            if fake_stack_gadget[3].decode('utf-8') == 'rbp' and fake_stack_gadget[4] == disclosure_gadget[1]:
                                 if fake_stack_gadget[7] + 8 == disclosure_gadget[6]:
                                     res.append([fake_stack_gadget, disclosure_gadget])
                                 # res.append([fake_stack_gadget,disclosure_gadget])
         print('there are %d pairs of gadgets:' % (len(res)))
+        if len(res) == 0:
+            embed()
         return res
 
 
@@ -117,12 +120,12 @@ class GadgetAnalysisMixin:
         fork_gadget_path = self._gadget_path + '/fork_gadget.txt'
         relay_gadget_path = self._gadget_path + '/relay_gadget.txt'
 
-        self.disclosure_gadgets = pickle.load(open(disclosure_gadget_path, 'rb'))
-        self.fake_stack_gadgets = pickle.load(open(fake_stack_gadget_path, 'rb'))
-        self.smash_gadgets = pickle.load(open(smash_gadget_path, 'rb'))
-        self.bloom_gadgets = pickle.load(open(bloom_gadget_path, 'rb'))
-        self.fork_gadgets = pickle.load(open(fork_gadget_path, 'rb'))
+        self.disclosure_gadgets = pickle.load(open(disclosure_gadget_path, 'rb'), encoding='bytes')
+        self.fake_stack_gadgets = pickle.load(open(fake_stack_gadget_path, 'rb'), encoding='bytes')
+        self.smash_gadgets = pickle.load(open(smash_gadget_path, 'rb'), encoding='bytes')
+        self.bloom_gadgets = pickle.load(open(bloom_gadget_path, 'rb'), encoding='bytes')
+        self.fork_gadgets = pickle.load(open(fork_gadget_path, 'rb'), encoding='bytes')
         try:
-            self.relay_gadgets = pickle.load(open(relay_gadget_path,'rb'))
+            self.relay_gadgets = pickle.load(open(relay_gadget_path, 'rb'), encoding='bytes')
         except:
-            print 'no relay gadget, pass'
+            print('no relay gadget, pass')

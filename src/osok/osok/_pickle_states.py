@@ -13,23 +13,23 @@ class PickleStatesMixin:
 
     def dump_good_bloom_state(self):
         for good_bloom_gadget in self.good_bloom_gadget:
-            print good_bloom_gadget
-        print 'there are %d good bloom gadget verified by symbolic execution' % (len(self.good_bloom_gadget))
+            print(good_bloom_gadget)
+        print('there are %d good bloom gadget verified by symbolic execution' % (len(self.good_bloom_gadget)))
         if not os.path.isfile('good_bloom_gadget.cache'):  # dump bloom gadget
             with open('good_bloom_gadget.cache', 'wb') as f:
                 pickle.dump(self.good_bloom_gadget, f, -1)
 
     def dump_good_bloom_state_2nd(self):
         for good_bloom_gadget in self.good_bloom_gadget:
-            print good_bloom_gadget
-        print 'there are %d good two level bloom gadget verified by symbolic execution' % (len(self.good_bloom_gadget))
+            print(good_bloom_gadget)
+        print('there are %d good two level bloom gadget verified by symbolic execution' % (len(self.good_bloom_gadget)))
         if not os.path.isfile('good_bloom_gadget_2nd.cache'):  # dump bloom gadget
             with open('good_bloom_gadget_2nd.cache', 'wb') as f:
                 pickle.dump(self.good_bloom_gadget, f, -1)
 
     def dump_good_bloom_state_2nd_discretely(self, idx):
         for good_bloom_gadget in self.good_bloom_gadget:
-            print good_bloom_gadget
+            print(good_bloom_gadget)
         subdir = './double_bloom/'
         filepath = subdir+'good_bloom_gadget_2nd_'+str(idx)+'.cache'
         if not os.path.isfile(filepath):
@@ -39,20 +39,20 @@ class PickleStatesMixin:
     def load_good_bloom_gadgets_from_disk(self):
         if not os.path.isfile('good_bloom_gadget_2nd.cache'):
             with open('good_bloom_gadget.cache', 'rb') as f:
-                print '[+] loading good bloom gadget'
+                print('[+] loading good bloom gadget')
                 self.good_bloom_gadget = pickle.load(f)
         else:
             with open('good_bloom_gadget_2nd.cache', 'rb') as f:
-                print '[+] loading double bloomed good bloom state'
+                print('[+] loading double bloomed good bloom state')
                 self.good_bloom_gadget = pickle.load(f)
 
     def dump_initial_state_to_disk(self, s):
         state_name='initial_state.cache'
         if not os.path.isfile(state_name):
             with open(state_name, 'wb') as f:
-                print 'pickling current initial state to disk'
+                print('pickling current initial state to disk')
                 pickle.dump(s, f, -1)
-                print 'successfully pickle initial state to disk'
+                print('successfully pickle initial state to disk')
 
     def dump_hyper_parameters(self):
         """
@@ -74,13 +74,20 @@ class PickleStatesMixin:
         """
         if os.path.isfile('critical_info.cache'):
             with open('critical_info.cache', 'rb') as f:
-                crit_info = pickle.load(f)
-                self.extra_module_base = crit_info['extra_module_base']
-                self.extra_module_size = crit_info['extra_module_size']
-                self.start_addr = crit_info['start_addr']
-                self.expected_start_rip = crit_info['expected_start_rip']
+                try:
+                    crit_info = pickle.load(f)
+                    self.extra_module_base = crit_info['extra_module_base']
+                    self.extra_module_size = crit_info['extra_module_size']
+                    self.start_addr = crit_info['start_addr']
+                    self.expected_start_rip = crit_info['expected_start_rip']
+                except KeyError and UnicodeDecodeError:
+                    crit_info = pickle.load(f, encoding='bytes')
+                    self.extra_module_base = crit_info[b'extra_module_base']
+                    self.extra_module_size = crit_info[b'extra_module_size']
+                    self.start_addr = crit_info[b'start_addr']
+                    self.expected_start_rip = crit_info[b'expected_start_rip']
         else:
-            print 'not found hyper parameters, run savevm.py first to get a start machine state'
+            print('not found hyper parameters, run savevm.py first to get a start machine state')
             assert 0
 
 

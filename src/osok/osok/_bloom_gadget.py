@@ -2,7 +2,7 @@ import angr
 import traceback
 import time
 import datetime
-from state_filters import *
+from .state_filters import *
 from IPython import embed
 
 
@@ -50,7 +50,6 @@ class BloomGadgetMixin:
     def check_bloom_regs(self, state):
         print('=' * 78)
         print('Call instruction at:', state.inspect.function_address)
-        print 'lalala'
 
         current_gadget = self.current_bloom_gadget
 
@@ -64,14 +63,14 @@ class BloomGadgetMixin:
 
         if number_of_bloomed_regs >= 3:
             self.good_bloom_gadget.append([self.current_bloom_gadget, state.copy(), bloomed_regs])
-            print 'blooming: %s!!!' % (self.current_bloom_gadget[1])
-            print bloomed_regs
+            print('blooming: %s!!!' % (self.current_bloom_gadget[1]))
+            print(bloomed_regs)
             # import IPython; IPython.embed()
 
         if state.regs.rdi.symbolic and state.regs.rsi.symbolic and state.regs.rdx.symbolic:
             self.good_bloom_gadget.append([self.current_bloom_gadget, state.copy(), bloomed_regs])
-            print 'perfect blooming! %s' % (self.current_bloom_gadget[1])
-            print bloomed_regs
+            print('perfect blooming! %s' % (self.current_bloom_gadget[1]))
+            print(bloomed_regs)
             # import IPython; IPython.embed()
         return
 
@@ -94,26 +93,26 @@ class BloomGadgetMixin:
         :param first_constraint_func:
         :return:
         """
-        print bloom_gadget
+        print(bloom_gadget)
         self.current_bloom_gadget = bloom_gadget
         self.reach_current_bloom_site=False
         bloom_entry, bloom_site = self.get_blooming_gadget_entry_and_site(bloom_gadget)
 
         if self.add_bloom_instrumentation:
-            print 'add bloom instrumentation'
+            print('add bloom instrumentation')
             self.instrument_bloom(state, bloom_entry, bloom_site, bloom_gadget)
 
         if first_constraint_func is not None:
             first_constraint_func(state, bloom_entry)
 
         if self.use_controlled_data_concretization:  # use controlled_data_concretization
-            print 'add concretization strategy'
+            print('add concretization strategy')
             self.add_concretization_strategy_controlled_data(state)
 
 
         b = self.b
         sol = self.sol
-        print 'initilizing sim group'
+        print('initilizing sim group')
         simgr = b.factory.simgr(state, save_unconstrained=True)
         if self.limit_loop:
             #llimiter = angr.exploration_techniques.LoopLimiter(count=5)
@@ -121,20 +120,22 @@ class BloomGadgetMixin:
             pass
         loop_idx = 0
         seen_bloom_state = False
-        print 'inspecting simgr...'
-        print simgr.active
+        print('inspecting simgr...')
+        print(simgr.active)
         while True:
-            print '[+] '+str(loop_idx)+' step()'
+            print('[+] '+str(loop_idx)+' step()')
             #self.debug_simgr(simgr)
             try:
                 simgr.step(stash='active')
-                print 'inspecting simgr...'
-                print simgr.active
+                print('inspecting simgr...')
+                print(simgr.active)
                 simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bad_rip)
                 #import IPython; IPython.embed()
-            except:
-                print 'wtf simgr error'
+            except Exception as e:
+                print(e)
+                print('wtf simgr error')
                 traceback.print_exc()
+                embed()
                 #raw_input()
                 #import IPython; IPython.embed()
                 del simgr
@@ -147,18 +148,26 @@ class BloomGadgetMixin:
                     # TODO:does this typical happens when indirect jump e.g jmp rdx?
                     # for addr in ucstate.history_iterator:
                         # print addr
-                    xxx = reversed(ucstate.history_iterator)
-                    xxx.next()
-                    xx = xxx.next()
-                    x = xxx.next()
-                    second_to_last_history = xx.addr
-                    third_to_last_history = x.addr
+                    #embed()
+                    #xxx = reversed(ucstate.history_iterator)
+                    xxx = reversed(ucstate.history.bbl_addrs)
+                    xxx.__next__()
+                    xx = xxx.__next__()
+                    try:
+                        x = xxx.__next__()
+                    except StopIteration:
+                        x = None
+                        pass
+                    #second_to_last_history = xx.addr
+                    second_to_last_history = xx
+                    third_to_last_history = x
                     if third_to_last_history is None:
                         #embed()
-                        third_to_last_history = second_to_last_history
+                        third_to_last_history = second_to_last_history  # this code looks very ugly, fix it
+
                     if bloom_site in self.b.factory.block(ucstate.history.addr).instruction_addrs:
                         # if the unconstrained state is generated from the bloom_site
-                        print 'reached current bloom site'
+                        print('reached current bloom site')
                         self.reach_current_bloom_site = True
                         bloomed_regs = self.get_number_of_bloomed_regs(ucstate)
                         number_of_bloomed_regs = len(bloomed_regs)
@@ -173,9 +182,9 @@ class BloomGadgetMixin:
                                 else:
                                     self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), \
                                                                    bloomed_regs, previous_blooming_gadget])
-                                print 'perfect blooming! %s' % (self.current_bloom_gadget[1])
+                                print('perfect blooming! %s' % (self.current_bloom_gadget[1]))
                                 seen_bloom_state = True
-                                print bloomed_regs
+                                print(bloomed_regs)
                             else:  # not perfect blooming
                                 continue
                         else:
@@ -183,13 +192,13 @@ class BloomGadgetMixin:
                             if number_of_bloomed_regs >= 4:
                                 self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
                                 seen_bloom_state = True
-                                print 'blooming: %s!!!' % (self.current_bloom_gadget[1])
+                                print('blooming: %s!!!' % (self.current_bloom_gadget[1]))
                             else:
                                 continue
                     elif bloom_site in self.b.factory.block(second_to_last_history).instruction_addrs or \
                             bloom_site in self.b.factory.block(third_to_last_history).instruction_addrs:
                         # if the unconstrained state is generated from the bloom_site and a call stub
-                        print 'reached current bloom site with a call stub'
+                        print('reached current bloom site with a call stub')
                         self.reach_current_bloom_site = True
                         bloomed_regs = self.get_number_of_bloomed_regs(ucstate)
                         number_of_bloomed_regs = len(bloomed_regs)
@@ -207,31 +216,31 @@ class BloomGadgetMixin:
                                 else:
                                     self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(),
                                                                    bloomed_regs, previous_blooming_gadget])
-                                print 'perfect blooming! %s' % (self.current_bloom_gadget[1])
+                                print('perfect blooming! %s' % (self.current_bloom_gadget[1]))
                                 seen_bloom_state = True
-                                print bloomed_regs
+                                print(bloomed_regs)
                                 if self.debug_bloom_verbose:
                                     import IPython; IPython.embed()
                         else:
                             if number_of_bloomed_regs >= 3:
                                 self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
                                 seen_bloom_state = True
-                                print 'blooming: %s!!!' % (self.current_bloom_gadget[1])
+                                print('blooming: %s!!!' % (self.current_bloom_gadget[1]))
                                 if self.debug_bloom_verbose:
                                     import IPython; IPython.embed()
                     else:  # maybe the function has multiple sites of indirect call, let's just ignore these states.
-                        print 'unexpected unconstrained state, inspecting...'
-                        for his_addr in ucstate.history_iterator:
-                            print his_addr
+                        print('unexpected unconstrained state, inspecting...')
+                        for his_addr in ucstate.history.bbl_addrs:
+                            print(hex(his_addr))
                         if self.debug_bloom_verbose:
                             #import IPython; IPython.embed()
                             pass
                         #import IPython; IPython.embed()
-                        print 'unexpected unconstrained state, removing...'
+                        print('unexpected unconstrained state, removing...')
                         simgr.unconstrained.remove(ucstate)
 
-                print '[+] end of dumping unconstrained states'
-                print '[+] wtf has unconstrained states'
+                print('[+] end of dumping unconstrained states')
+                print('[+] wtf has unconstrained states')
                 # import IPython; IPython.embed()
                 if seen_bloom_state:
                     del simgr
@@ -256,7 +265,7 @@ class BloomGadgetMixin:
                 return
 
             if self.pause_on_each_step:
-                raw_input('step?<-')
+                input('step?<-')
 
         del simgr
         return seen_bloom_state
@@ -269,7 +278,7 @@ class BloomGadgetMixin:
         initial_state = self.get_initial_state(switch_cpu=True, control_memory_base=self.controlled_memory_base)
         total = len(self.bloom_gadgets)
         for i, bloom_gadget in enumerate(self.bloom_gadgets):
-            print '[+] ===== checking %d/%d th bloom gadget... =====' % (i, total)
+            print('[+] ===== checking %d/%d th bloom gadget... =====' % (i, total))
             # some function should be put in blacklist
             if bloom_gadget[1] == 'udp_v6_early_demux':
                 continue
@@ -281,7 +290,7 @@ class BloomGadgetMixin:
         # get execution time
         current_time = time.time()
         executed_time = current_time-self.start_time_of_symbolic_execution
-        print '[+] symbolic execution of blooming gadget takes up to %f seconds' % executed_time
+        print('[+] symbolic execution of blooming gadget takes up to %f seconds' % executed_time)
 
         self.dump_good_bloom_state()
 
@@ -297,30 +306,29 @@ class BloomGadgetMixin:
             # first stage
             self.require_perfect_bloom_gadget = False  # temporarily turn off perfect requirement
             for i, bloom_gadget in enumerate(self.bloom_gadgets):
-                print '[+] ===== checking %d/%d th bloom gadget... =====' % (i, total)
+                print('[+] ===== checking %d/%d th bloom gadget... =====' % (i, total))
                 tmp_state = initial_state.copy()
                 if bloom_gadget[1] == 'udp_v6_early_demux':  # skip black list gadget
                     continue
                 self.run_bloom_gadget(tmp_state, bloom_gadget, first_constraint_func=self.first_constraint_func)
                 del tmp_state
-            print 'identified %d good bloom states in first stage...' % len(self.good_bloom_gadget)
+            print('identified %d good bloom states in first stage...' % len(self.good_bloom_gadget))
             self.dump_good_bloom_state()
 
         tmp_good_bloom_gadgets = list(self.good_bloom_gadget)
         self.good_bloom_gadget = []
 
         # Second stage
-        print 'start second stage'
+        print('start second stage')
         self.require_perfect_bloom_gadget = True  # turn on our perfect requirement
         for i, good_bloom_gadget in enumerate(tmp_good_bloom_gadgets):
             if start_idx_for_second_phase is not None:
                 if i < start_idx_for_second_phase:
                     continue
-            print '[+] checking %d/%d good bloom state for second bloom' % (i, len(tmp_good_bloom_gadgets))
+            print('[+] checking %d/%d good bloom state for second bloom' % (i, len(tmp_good_bloom_gadgets)))
             ts = time.time()
             st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
-            print st,
-            print '[+] now we have found %d good bloom state via double blooming' % len(self.good_bloom_gadget)
+            print(st, '[+] now we have found %d good bloom state via double blooming' % len(self.good_bloom_gadget))
             old_good_bloom_states = len(good_bloom_gadget)
             for ii, bloom_gadget in enumerate(self.bloom_gadgets):
                 if save_memory:  # improve the memory efficiency of the program
@@ -330,13 +338,13 @@ class BloomGadgetMixin:
                     self.good_bloom_gadget = []
                 if bloom_gadget[1] == 'udp_v6_early_demux':  # skip black list gadget
                     continue
-                print '[+] double checking %d/%d th bloom gadget...' % (ii, len(self.bloom_gadgets))
+                print('[+] double checking %d/%d th bloom gadget...' % (ii, len(self.bloom_gadgets)))
                 bloom_entry, bloom_site = self.get_blooming_gadget_entry_and_site(bloom_gadget)
                 tmp_state = good_bloom_gadget[1].copy()
                 # constraining rip to second bloom gadget
                 tmp_state.add_constraints(tmp_state.regs.rip == bloom_entry)
                 if not tmp_state.satisfiable():
-                    print "[-] can not set bloom target to second blooming gadget"
+                    print("[-] can not set bloom target to second blooming gadget")
                     # we want to debug the problem here
                     if self.debug_bloom_verbose:
                         import IPython; IPython.embed()

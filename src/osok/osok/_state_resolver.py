@@ -12,13 +12,14 @@ class StateResolverMixin:
     def reset_backer_memory(self, addr, buf):
         aligned_addr = addr & 0xfffffffffffff000
         try:
-            self.b.loader.memory.write_bytes(aligned_addr, buf)
+            #self.b.loader.memory.write_bytes(aligned_addr, buf)
+            self.b.loader.memory.store(aligned_addr, buf)
         except ValueError as e:
-            print e
+            print(e)
             embed()
             pass
         except TypeError as e:
-            print e
+            print(e)
             embed()
             pass
 
@@ -29,22 +30,24 @@ class StateResolverMixin:
         section_offset = section.vaddr
         section_length = section.memsize
         if section_length % 4096 != 0:
-            section_length = ((section_length / 4096) + 1) * 4096
-        num_of_page = section_length / 4096
-        print 'installing', num_of_page, 'pages of section:', name
+            section_length = ((section_length // 4096) + 1) * 4096
+        num_of_page = section_length // 4096
+        print('installing', num_of_page, 'pages of section:', name)
         for i in range(num_of_page):
             # print i
             addr = section_offset + i * 4096
 
             # skip page in white_list
             if addr in white_list:
-                print 'skip addr: %x' % addr
+                print('skip addr: %x' % addr)
                 continue
 
             qemu_con = self.statebroker.get_a_page(r, addr)
             if qemu_con is not None:
                 # get old content of that page from backer
-                cle_con = ''.join(self.b.loader.memory.read_bytes(addr, 4096))
+                #embed()
+                #cle_con = ''.join(self.b.loader.memory.read_bytes(addr, 4096))
+                cle_con = self.b.loader.memory.load(addr, 4096)
                 # calculate the md5 of cle memory and qemu memory content
                 cle_md5 = hashlib.md5(cle_con).hexdigest()
                 qemu_md5 = hashlib.md5(qemu_con).hexdigest()
@@ -57,6 +60,6 @@ class StateResolverMixin:
                         #print 'same content for cle and qemu at page %x, skip' % addr
                         pass
             else:
-                raw_input('failed to get_a_page')
-        print 'Finished fixing section:', name
+                input('failed to get_a_page')
+        print('Finished fixing section:', name)
         return

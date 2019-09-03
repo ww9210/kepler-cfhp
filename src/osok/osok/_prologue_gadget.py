@@ -1,7 +1,7 @@
 import colorama
 import angr
 import traceback
-from state_filters import *
+from .state_filters import *
 from IPython import embed
 
 class PrologueGadgetMixin:
@@ -11,14 +11,14 @@ class PrologueGadgetMixin:
         :param state: the state
         :return: dict of interested register values
         """
-        print '[+] extracting prologue call site signatures...'
+        print('[+] extracting prologue call site signatures...')
         signature = dict()
         signature['rdx'] = state.regs.rdx
         signature['rsi'] = state.regs.rsi
         signature['rdi'] = state.regs.rdi
-        print 'rdx', state.regs.rdx
-        print 'rsi', state.regs.rdi
-        print 'rdi', state.regs.rdi
+        print('rdx', state.regs.rdx)
+        print('rsi', state.regs.rdi)
+        print('rdi', state.regs.rdi)
         # import IPython; IPython.embed()
         return signature
 
@@ -31,20 +31,20 @@ class PrologueGadgetMixin:
         :return:
         """
         self.reach_current_prologue_entry = True
-        print colorama.Fore.RED + 'enter prologue gadget' + colorama.Style.RESET_ALL
+        print(colorama.Fore.RED + 'enter prologue gadget' + colorama.Style.RESET_ALL)
         if not self.is_dfs_search_routine:
             state.inspect.remove_breakpoint("call", self.first_fork_site_bp)
-            print '[+] removed the call bp at the first fork site..'
+            print('[+] removed the call bp at the first fork site..')
         #
         self.bp_enforce_prologue_to_copy_to_user = state.inspect.b("call", when=angr.BP_BEFORE
                                                                    , action=self.enforce_prologue_to_copy_to_user)
-        print '[+] enforced a bp on call for disclosure'
+        print('[+] enforced a bp on call for disclosure')
         #import IPython; IPython.embed()
         return
 
     def track_prologue_address_concretization(self, state):
-        print 'address_concretization event bp at first fork site', hex(state.addr)
-        print 'setting strategy to controlled_data'
+        print('address_concretization event bp at first fork site', hex(state.addr))
+        print('setting strategy to controlled_data')
         state.inspect.address_concretization_strategy = state.memory.read_strategies[0]
         #import IPython; IPython.embed()
         return
@@ -56,18 +56,18 @@ class PrologueGadgetMixin:
         :return:
         """
         if state.regs.rip.symbolic:
-            print 'trying to extract signature at prologue indirect jump to copy_from_user'
-            print colorama.Fore.RED +'jmp instruction at:', hex(state.history.addr) + colorama.Style.RESET_ALL
+            print('trying to extract signature at prologue indirect jump to copy_from_user')
+            print(colorama.Fore.RED +'jmp instruction at:', hex(state.history.addr) + colorama.Style.RESET_ALL)
             # self.dump_reg(state)
             print(colorama.Fore.RED + '[+] extracting runtime data flow signature for pairing with disclosure gadget'
                   + colorama.Style.RESET_ALL)
             data_signatures = self.extract_prologue_call_site_signature(state)
             self.current_prologue_signature = data_signatures
-            print (colorama.Fore.RED + '[!] removing bp_enforce_prologue_to_copy_to_user)' + colorama.Style.RESET_ALL)
+            print(colorama.Fore.RED + '[!] removing bp_enforce_prologue_to_copy_to_user)' + colorama.Style.RESET_ALL)
             state.inspect.remove_breakpoint('call', self.bp_enforce_prologue_to_copy_to_user)
             # embed()
         else:
-            print 'rip is not symbolic, this should never happen'
+            print('rip is not symbolic, this should never happen')
             embed()
         return
 
@@ -78,18 +78,18 @@ class PrologueGadgetMixin:
         :return:
         """
         if state.regs.rip.symbolic:
-            print 'trying to extract signature at prologue indirect call to copy_from_user'
-            print 'Call target address :', state.inspect.function_address
+            print('trying to extract signature at prologue indirect call to copy_from_user')
+            print('Call target address :', state.inspect.function_address)
             # self.dump_reg(state)  # dump registers for debug purpose
             print(colorama.Fore.RED + '[+] extracting runtime data flow signature for pairing with disclosure gadget'
                   + colorama.Style.RESET_ALL)
             data_signatures = self.extract_prologue_call_site_signature(state)
             self.current_prologue_signature = data_signatures
-            print (colorama.Fore.RED + '[!] removing bp_enforce_prologue_to_copy_to_user)' + colorama.Style.RESET_ALL)
+            print(colorama.Fore.RED + '[!] removing bp_enforce_prologue_to_copy_to_user)' + colorama.Style.RESET_ALL)
             state.inspect.remove_breakpoint('call', self.bp_enforce_prologue_to_copy_to_user)
             # embed()
         else:
-            print 'rip is not symbolic, we are not removing this enforcement until we finding one'
+            print('rip is not symbolic, we are not removing this enforcement until we finding one')
             # embed()
         return
 
@@ -101,8 +101,8 @@ class PrologueGadgetMixin:
         """
         prologue_gadget = self.current_prologue_gadget
         prologue_entry = prologue_gadget[6]
-        print '='*78
-        print 'Call instruction at:', state.inspect.function_address
+        print('='*78)
+        print('Call instruction at:', state.inspect.function_address)
         self.reach_current_first_fork_site = True
         print('reached current first fork site')
         if state.regs.rip.symbolic:
@@ -110,18 +110,18 @@ class PrologueGadgetMixin:
                   + colorama.Style.RESET_ALL)
             state.add_constraints(state.regs.rip == prologue_entry)  # add constraint
             if state.satisfiable():
-                print '[+] constraint satisfiable'
+                print('[+] constraint satisfiable')
                 pass
             else:
                 print('state is not satisfiable')
                 # embed()
                 self.unsatisfiable_state.append(state.copy())
             if self.pause_on_prologue_on_fork:
-                opt = raw_input('ipython shell? [y/N]')
+                opt = input('ipython shell? [y/N]')
                 if opt == 'y\n':
                     embed()
         else:
-            print 'rip is not symbolic wtf'
+            print('rip is not symbolic wtf')
             # embed()
         return
 
@@ -164,7 +164,7 @@ class PrologueGadgetMixin:
         try:
             address_near_to_copy_from_user = disclosure_gadget[4][0]['addr']
         except all:
-            print 'wtf'
+            print('wtf')
             # embed()
 
         tmp_bbl = self.b.factory.block(address_near_to_copy_from_user)
@@ -183,7 +183,7 @@ class PrologueGadgetMixin:
 
         # call breakpoint for first fork site
         if not self.is_dfs_search_routine:
-            print 'first fork site: %x' % first_fork_site
+            print('first fork site: %x' % first_fork_site)
             self.first_fork_site_bp = state.inspect.b('call', when=angr.BP_BEFORE
                                                       , instruction=first_fork_site
                                                       , action=self.enforce_prologue_on_first_fork)
@@ -191,7 +191,7 @@ class PrologueGadgetMixin:
             pass  # in this case, we have already set the indirect jump target of first indirect jump in fork gadget
 
         # call breakpoint for disclosure site
-        print 'copy_to_user site: %x' % disclosure_site
+        print('copy_to_user site: %x' % disclosure_site)
         state.inspect.b('call', when=angr.BP_BEFORE, instruction=disclosure_site
                         , action=self.disclosure_site_callback)
         # state.inspect.remove_breakpoint("call", self.first_fork_site_bp)
@@ -235,38 +235,38 @@ class PrologueGadgetMixin:
         b = self.b
 
         simgr = b.factory.simgr(state, save_unconstrained=True)
-        print simgr.active
+        print(simgr.active)
         self.loop_idx_prologue_state = 0
         seen_unconstrained_state = False
         while True:
             if not self.reach_current_prologue_site:  # have not reach the prologue entry
-                print '[+] ' + str(self.loop_idx_prologue_state) + ' step()'
+                print('[+] ' + str(self.loop_idx_prologue_state) + ' step()')
                 try:
                     # embed()
-                    print 'stepping...'
+                    print('stepping...')
                     simgr.step(stash='active')  # step()
-                    print simgr.active
+                    print(simgr.active)
                     for act_state in simgr.active:
                         if filter_bad_rip(act_state):
-                            print 'found wtf state:', act_state
+                            print('found wtf state:', act_state)
                             #embed()
                         if act_state.osokplugin.should_get_killed is True:
-                            print "removing state:", act_state
+                            print("removing state:", act_state)
                             simgr.active.remove(act_state)
-                    print 'removing bad state to deadended'
+                    print('removing bad state to deadended')
                     simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bad_rip)
                 except Exception as e:
-                    print e
-                    print 'wtf simgr error'
+                    print(e)
+                    print('wtf simgr error')
                     traceback.print_exc()
-                    raw_input()
+                    input()
                     del simgr
                     return
 
                 self.loop_idx_prologue_state += 1  # increase the loop idx
 
                 if len(simgr.deadended) > 0:
-                    print 'has deadended states, inspecting..'
+                    print('has deadended states, inspecting..')
                     # embed()
                     for deadend_state in simgr.deadended:
                         simgr.deadended.remove(deadend_state)  # save memory usage
@@ -284,15 +284,15 @@ class PrologueGadgetMixin:
 
                 if not self.has_indirect_call_thunk:  # the system does not have indirect call stub
                     if not self.use_extended_auxiliary_gadget and self.loop_idx_prologue_state == 3:
-                        print 'we should be able to finish the analysis in *three* steps'
-                        print 'lets save the good states'
+                        print('we should be able to finish the analysis in *three* steps')
+                        print('lets save the good states')
                         for active_state in simgr.stashes['active']:
                             if active_state.osokplugin.has_good_disclosure_site:  # is good disclosure site
-                                print active_state, 'is a good disclosure site'
+                                print(active_state, 'is a good disclosure site')
                                 # embed()
 
                                 if self.reproduce_mode:  # in reproduce mode add our constraint now
-                                    print '[+] reproduce mode: add constraint to ensure successful disclosure'
+                                    print('[+] reproduce mode: add constraint to ensure successful disclosure')
 
                                     """
                                     * * adding constraint here, should be very careful with constraint added * *
@@ -305,7 +305,7 @@ class PrologueGadgetMixin:
                                     """
 
                                     if not active_state.satisfiable():
-                                        print '[!] can not successfully generate good disclosure state'
+                                        print('[!] can not successfully generate good disclosure state')
                                         continue
 
                                 self.tmp_good_disclosure_state_number += 1
@@ -331,7 +331,7 @@ class PrologueGadgetMixin:
                     for active_state in simgr.stashes['active']:
                         if active_state.osokplugin.has_good_disclosure_site:  # is good disclosure site
                             seen_good_disclosure_site = True
-                            print active_state, 'is a good disclosure site'
+                            print(active_state, 'is a good disclosure site')
                             # embed()
                             self.tmp_good_disclosure_state_number += 1
                             # append current state to global good list
@@ -344,9 +344,9 @@ class PrologueGadgetMixin:
                                                               )
                     if seen_good_disclosure_site or self.loop_idx_prologue_state > 7:
                         if seen_good_disclosure_site:
-                            print 'already found good disclosure site, clean up and return'
+                            print('already found good disclosure site, clean up and return')
                         else:
-                            print 'too much steps, abort..'
+                            print('too much steps, abort..')
                         del simgr
                         return
 
@@ -354,49 +354,49 @@ class PrologueGadgetMixin:
                     if self.current_prologue_signature is None:
                         for uc_state in simgr.unconstrained:
                             if uc_state.history.jumpkind == 'Ijk_Boring':
-                                print 'Previous jumpkind is ', 'Ijk_Boring', 'symbolic indirect jump'
+                                print('Previous jumpkind is ', 'Ijk_Boring', 'symbolic indirect jump')
                                 # extract prologue signature
                                 self.enforce_indirect_jump_to_disclosure_gadget(uc_state)
                                 # lets remove the bp at the callsite now
 
                             else:
-                                print 'we already found unconstrained states but no prologue signatures, wtf...'
-                                print 'this should never happen...'
+                                print('we already found unconstrained states but no prologue signatures, wtf...')
+                                print('this should never happen...')
                                 embed()
                     else:  # already have prologue signature
                         print(colorama.Fore.RED+'[+] found %d unconstrained states' % (len(simgr.unconstrained))
                               + colorama.Style.RESET_ALL)
-                        print 'how to handle unconstrained state?'
+                        print('how to handle unconstrained state?')
                         for ucstate in simgr.unconstrained:
                             for addr in ucstate.history_iterator:
-                                print addr
+                                print(addr)
                             hotmap, sub_gadget_entry = self.analyze_disclosure_gadget(self.current_disclosure_gadget)
                             if len(sub_gadget_entry) == 0 or sub_gadget_entry == [0, 0, 0]:
-                                print 'There is not good sub disclosure gadget entry site, abort this simgr...'
+                                print('There is not good sub disclosure gadget entry site, abort this simgr...')
                                 del simgr
                                 return
                             target_addrs = self.decide_disclosure_landing_site(self.current_prologue_signature
                                                                                , hotmap, sub_gadget_entry)
                             if target_addrs is None:
-                                print 'There is not good target landing disclosure gadget site, abort this simgr...'
+                                print('There is not good target landing disclosure gadget site, abort this simgr...')
                                 del simgr
                                 return
                             else:
-                                print 'there are %d candidates of landing targets' % (len(target_addrs))
+                                print('there are %d candidates of landing targets' % (len(target_addrs)))
                                 for i, target_addr in enumerate(target_addrs):
-                                    print 'generating state for %dth landing target' % i
+                                    print('generating state for %dth landing target' % i)
                                     new_state = ucstate.copy()
-                                    print 'constraining the rip to %x' % target_addr
+                                    print('constraining the rip to %x' % target_addr)
                                     new_state.add_constraints(ucstate.regs.rip == target_addr)
                                     if new_state.satisfiable():
-                                        print 'appending the cloned state to active stash'
+                                        print('appending the cloned state to active stash')
                                         simgr.stashes['active'].insert(1, new_state)
                                     else:
-                                        print 'found unsatisfiable states'
+                                        print('found unsatisfiable states')
                                         self.unsatisfiable_state.append(new_state)
                                 # embed()
 
-                        print 'remove unconstrained state'
+                        print('remove unconstrained state')
                         simgr.stashes['unconstrained'] = []
                         #embed()
                     pass
@@ -415,7 +415,7 @@ class PrologueGadgetMixin:
         :param good_bloom_and_fork_gadget: a good pair of bloom gadget and fork gadget
         :return: None
         """
-        print '[+] multiple runs bloom and fork gadget'
+        print('[+] multiple runs bloom and fork gadget')
         bloom_gadget = good_bloom_and_fork_gadget[0]
         forking_gadget = good_bloom_and_fork_gadget[1]
         constraints = good_bloom_and_fork_gadget[2]
@@ -428,9 +428,9 @@ class PrologueGadgetMixin:
         initial_state = self.initial_state
 
         if first_reached_fork_site in [1, 3]:
-            print 'firstly reach first fork site'
+            print('firstly reach first fork site')
         elif first_reached_fork_site in [2, 4]:
-            print 'firstly reach second fork site'
+            print('firstly reach second fork site')
         else:
             assert 0
         self.tmp_good_disclosure_state_number = 0
@@ -446,11 +446,11 @@ class PrologueGadgetMixin:
             print('failed symbolic tracing attempt')
             embed()
             return
-        print 'finished symbolic tracing'
+        print('finished symbolic tracing')
         for i, prologue_disclosure_pair in enumerate(self.prologue_disclosure_pairs):
-            print '====== checking ' + colorama.Fore.RED\
+            print('====== checking ' + colorama.Fore.RED\
                   + '%d/%d ' % (i, len(self.prologue_disclosure_pairs)) + colorama.Style.RESET_ALL\
-                  + 'pair of prologue and disclosure gadget'
+                  + 'pair of prologue and disclosure gadget')
 
             # embed()
             tmp_state = fork_site_state.copy()
@@ -459,7 +459,7 @@ class PrologueGadgetMixin:
             del tmp_state
             # fast path: if we get several states, just return
             if self.fast_path_for_disclosure_state and self.tmp_good_disclosure_state_number > 10:
-                print colorama.Fore.CYAN + 'we already get enough states, just return' + colorama.Style.RESET_ALL
+                print(colorama.Fore.CYAN + 'we already get enough states, just return' + colorama.Style.RESET_ALL)
                 del fork_site_state
                 return
         del fork_site_state

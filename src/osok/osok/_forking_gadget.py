@@ -1,7 +1,7 @@
 import colorama
 import traceback
 import angr
-from state_filters import *
+from .state_filters import *
 class ForkingGadgetMixin:
     def enforce_fork_on_bloom(self, state):
         fork_gadget = self.current_forking_gadget
@@ -12,7 +12,7 @@ class ForkingGadgetMixin:
         state.osokplugin.reach_bloom_site = True
         # import IPython; IPython.embed()
         if state.regs.rip.symbolic:
-            print(colorama.Fore.RED + '[+] connecting bloom and fork by adding constraint' \
+            print(colorama.Fore.RED + '[+] connecting bloom and fork by adding constraint'
                   + colorama.Style.RESET_ALL)
             state.add_constraints(state.regs.rip == fork_entry)  # add constraint
             if state.satisfiable():
@@ -21,7 +21,7 @@ class ForkingGadgetMixin:
                 print('state is not satisfiable')
                 self.unsatisfiable_state.append(state.copy())
             if self.pause_on_enforce_fork_on_bloom:
-                opt = raw_input('ipython shell? [y/N]')
+                opt = input('ipython shell? [y/N]')
                 if opt == 'y\n':
                     import IPython; IPython.embed()
         else:
@@ -40,7 +40,7 @@ class ForkingGadgetMixin:
 
     def enter_fork_callback(self, state):
         self.reach_current_fork_gadget = True
-        print colorama.Fore.RED + 'enter fork gadget' + colorama.Style.RESET_ALL
+        print(colorama.Fore.RED + 'enter fork gadget' + colorama.Style.RESET_ALL)
         # raw_input('con?')
         # import IPython; IPython.embed()
         return
@@ -53,7 +53,7 @@ class ForkingGadgetMixin:
         """
         #self.reach_current_first_fork_site = True
         state.osokplugin.reach_first_fork_site = True
-        print 'reach first fork site'
+        print('reach first fork site')
         # check number of controlled regsiters
         try:
             bloomed_regs = self.get_number_of_bloomed_regs(state)
@@ -61,11 +61,11 @@ class ForkingGadgetMixin:
             print('[+] there are %d controlled regsiters' % number_of_bloomed_regs)
         except:
             traceback.print_exc()
-            raw_input()
+            input()
         # fork
         if state.osokplugin.firstly_reach_first_fork_site and not state.osokplugin.reach_second_fork_site:
             # we reach first fork site for two consecutive times without reaching second fork site
-            print 'found good bloom fork pair'
+            print('found good bloom fork pair')
             constraints = list(state.se.constraints)
             self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)
                             , constraints , list(state.osokplugin.constraints_at_firstly_reached_site) \
@@ -79,7 +79,7 @@ class ForkingGadgetMixin:
             state.osokplugin.history_bbls_to_firstly_reached_fork_site = [addr.addr for addr in state.history_iterator]
 
         if state.osokplugin.reach_second_fork_site:##TODO we can not pickle state from userhook!!!!
-            print 'found good bloom fork pair'
+            print('found good bloom fork pair')
             constraints = list(state.se.constraints)
             self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget), constraints\
                     , list(state.osokplugin.constraints_at_firstly_reached_site)\
@@ -96,7 +96,7 @@ class ForkingGadgetMixin:
         """
         #self.reach_current_second_fork_site = True
         state.osokplugin.reach_second_fork_site = True
-        print 'reach second fork site'
+        print('reach second fork site')
         #check controlled regsiters
         try:
             bloomed_regs = self.get_number_of_bloomed_regs(state)
@@ -104,11 +104,11 @@ class ForkingGadgetMixin:
             print('[+] there are %d controlled registers' % number_of_bloomed_regs)
         except:
             traceback.print_exc()
-            raw_input()
+            input()
 
         if state.osokplugin.firstly_reach_second_fork_site and not state.osokplugin.reach_first_fork_site:
             # we reach second fork site for two consecutive times without reaching first fork site
-            print 'found good bloom fork pair'
+            print('found good bloom fork pair')
             constraints = list(state.se.constraints)
             self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)\
                         , constraints
@@ -123,7 +123,7 @@ class ForkingGadgetMixin:
             state.osokplugin.history_bbls_to_firstly_reached_fork_site = [addr.addr for addr in state.history_iterator]
 
         if state.osokplugin.reach_first_fork_site:
-            print 'found good bloom fork pair'
+            print('found good bloom fork pair')
             constraints = list(state.se.constraints)
             self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)
                     , constraints
@@ -187,7 +187,7 @@ class ForkingGadgetMixin:
         # enforce the constraint to let the bloom gadget to land at the forking gadget, 233
         state.add_constraints(state.regs.rip == fork_entry)
         if not state.satisfiable():
-            print "[-] can not set bloom target to fork gadget"
+            print("[-] can not set bloom target to fork gadget")
             return
 
         self.current_forking_gadget = forking_gadget
@@ -207,16 +207,16 @@ class ForkingGadgetMixin:
         self.loop_idx_forking_stage = 0
         #loop_idx = 0
         while True:
-            print '[+] ' + str(self.loop_idx_forking_stage) + ' step()'
+            print('[+] ' + str(self.loop_idx_forking_stage) + ' step()')
             #self.debug_simgr(simgr)
             try:
-                print 'purge deadend state'
+                print('purge deadend state')
                 simgr.stashes['deadended'] = []
-                print '[*] stepping...'
-                print simgr.stashes
+                print('[*] stepping...')
+                print(simgr.stashes)
                 simgr.step(stash='active')
                 self.loop_idx_forking_stage += 1
-                print 'inspecting simgr...'
+                print('inspecting simgr...')
                 simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bad_rip)
                 #if self.loop_idx_forking_stage > 7:
                     #simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bloom_unreachable)
@@ -224,7 +224,7 @@ class ForkingGadgetMixin:
                     simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_fork_unreachable)
                 #import IPython; IPython.embed()
             except:
-                print 'wtf simgr error'
+                print('wtf simgr error')
                 traceback.print_exc()
                 del simgr
                 return
@@ -251,7 +251,7 @@ class ForkingGadgetMixin:
                 #return
 
             if self.loop_idx_forking_stage > 11:
-                print 'reach max bbl number limit, terminating execution'
+                print('reach max bbl number limit, terminating execution')
                 del simgr
                 return
 
@@ -263,7 +263,7 @@ class ForkingGadgetMixin:
                 print('[+] dumping unconstrained states')
                 for ucstate in simgr.unconstrained:
                     for addr in ucstate.history_iterator:
-                        print addr
+                        print(addr)
                     if ucstate.osokplugin.reach_bloom_site:
                         print('already reached the bloom site, should not get stupid unconstrained state')
                         #import IPython; IPython.embed()
@@ -274,7 +274,7 @@ class ForkingGadgetMixin:
                             ucstate.osokplugin.reach_bloom_site = True
                             self.reach_current_bloom_site = True
                             print('just reached the bloom site')
-                            print 'constraining rip to: ', hex(fork_entry)
+                            print('constraining rip to: ', hex(fork_entry))
                             ucstate.add_constraints(ucstate.regs.rip == fork_entry)
                             if ucstate.satisfiable():
                                 simgr.move(from_stash='unconstrained', to_stash='active', filter_func=lambda s: s == ucstate)
@@ -288,7 +288,7 @@ class ForkingGadgetMixin:
             finished = False
             for active_state in simgr.stashes['active']:
                 if active_state.osokplugin.reach_first_fork_site and active_state.osokplugin.reach_second_fork_site:
-                    print 'already reached two fork sites of current fork gadget, exiting...'
+                    print('already reached two fork sites of current fork gadget, exiting...')
                     finished = True
             if finished:
                 del simgr
@@ -301,7 +301,7 @@ class ForkingGadgetMixin:
         :param good_bloom_gadget:
         :return:
         """
-        print '[+] multiple runs forking gadget'
+        print('[+] multiple runs forking gadget')
         bloom_gadget = good_bloom_gadget[0]
         bloom_state = good_bloom_gadget[1]
         self.current_bloom_gadget = bloom_gadget
@@ -310,8 +310,8 @@ class ForkingGadgetMixin:
         for i, forking_gadget in enumerate(self.fork_gadgets):
             #if i % 16 != 0:
                 #continue
-            print '[+] ===== checking %d/%d th forking gadget...=====' % (i, total)
-            print forking_gadget
+            print('[+] ===== checking %d/%d th forking gadget...=====' % (i, total))
+            print(forking_gadget)
             #import IPython; IPython.embed()
             tmp_state = bloom_state.copy()
             self.run_forking_gadget(tmp_state, good_bloom_gadget, forking_gadget)

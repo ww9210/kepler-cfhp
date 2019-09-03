@@ -9,7 +9,6 @@ import angr
 from capstone import *
 from angr import concretization_strategies
 import claripy
-from pwn import *
 import sys
 sys.path.append('/home/ww9210/develop/concolic_execution')
 import statebroker
@@ -18,26 +17,27 @@ import os
 from os import listdir
 from os.path import isfile, join
 from multiprocessing import Lock
-import state_filters
-import _concrete_state
-import _pickle_states
-import _gadget_analysis
-import _relay_gadget
-import _bloom_gadget
-import _disclosure_gadget
-import _forking_gadget
-import _prologue_gadget
-import _smash_gadget
-import _symbolic_tracing
-import _exploit_routine
-import _exploit_routine_dfs
-import _state_resolver
-import _debug_utility
-import _payload_generation
-import _exploit_generation
+from . import state_filters
+from . import _concrete_state
+from . import _pickle_states
+from . import _gadget_analysis
+from . import _relay_gadget
+from . import _bloom_gadget
+from . import _disclosure_gadget
+from . import _forking_gadget
+from . import _prologue_gadget
+from . import _smash_gadget
+from . import _symbolic_tracing
+from . import _exploit_routine
+from . import _exploit_routine_dfs
+from . import _state_resolver
+from . import _debug_utility
+from . import _payload_generation
+from . import _exploit_generation
 
 
-class OneShotExploit(object, _concrete_state.ConcreteStateMixin
+#class OneShotExploit(object, _concrete_state.ConcreteStateMixin
+class OneShotExploit(_concrete_state.ConcreteStateMixin
                      , _pickle_states.PickleStatesMixin
                      , _gadget_analysis.GadgetAnalysisMixin
                      , _relay_gadget.RelayGadgetMixin
@@ -54,24 +54,24 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin
                      , _payload_generation.PayloadGenerationMixin
                      , _exploit_generation.ExploitGenererationMixin
                      ):
-    def __init__(self, l=None, q=None, kernel_path=None):
+    def __init__(self, plock=None, q=None, kernel_path=None):
         """
         :param kernel_path: the vmlinux path to the kernel
         """
-        if l is not None:
-            self.lock = l  # this is the lock because all instances of osok share a qemu instance
+        if plock is not None:
+            self.lock = plock  # this is the lock because all instances of osok share a qemu instance
         else:
             self.lock = None
         self.queue = q
 
         self.kernel_path = kernel_path
         if os.path.isfile('angr_project.cache'):
-            with open('angr_project.cache','rb') as f:
-                print '[+] deserilizing vmlinux from pickle dump'
+            with open('angr_project.cache', 'rb') as f:
+                print('[+] load kernel vmlinux binary from pickle dump')
                 self.b = pickle.load(f)
         else:
             self.b = angr.Project(kernel_path)
-            with open('angr_project.cache','wb') as f:
+            with open('angr_project.cache', 'wb') as f:
                 pickle.dump(self.b, f)
         self.r = None
         self.statebroker = statebroker.StateBroker()
@@ -208,6 +208,8 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin
         self.snapshot_prefix=snapshot_prefix
         self.payload_path = payload_path
         mypath = payload_path
+        if not os.path.isdir(mypath):
+            os.mkdir(mypath)
         onlyfiles = [f for f in listdir(mypath) if isfile(join(mypath, f))]
         f_cnt = 0
         for fn in onlyfiles:
@@ -219,7 +221,7 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin
     def getInstructionLengthByAddr(self, addr):
         tmpbb = self.b.factory.block(addr)
         if tmpbb.size > 5:
-            print 'wtf tmpbb size >  5'
+            print('wtf tmpbb size >  5')
             import IPython; IPython.embed()
         # call __x86_indirect_thunk_rax
         assert tmpbb.size <= 5

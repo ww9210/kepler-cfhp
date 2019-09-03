@@ -1,5 +1,10 @@
 import traceback
 
+def filter_concrete(somestate):
+    if somestate.ip.symbolic:
+        return False
+    if somestate.ip.concrete:
+        return True
 
 def filter_bad_rip(somestate):
     """
@@ -18,7 +23,7 @@ def filter_bad_rip(somestate):
             return True
         return False
     except all as e:
-        print e
+        print(e)
         traceback.print_exc()
         import IPython; IPython.embed()
 

