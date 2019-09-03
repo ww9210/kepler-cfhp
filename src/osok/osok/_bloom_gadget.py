@@ -2,6 +2,7 @@ import angr
 import traceback
 import pickle
 import time
+import datetime
 import os
 
 
@@ -18,7 +19,7 @@ class BloomGadgetMixin:
         for reg_name in reg_names:
             # print reg_name
             val = state.registers.load(reg_name)
-            if val.symbolic:
+            if val.symbolic:  # symbolic registers are considered under control
                 # print reg_name, val
                 bloomed_regs.append(reg_name)
             elif val.concrete:
@@ -26,10 +27,9 @@ class BloomGadgetMixin:
                     if type(val) == angr.state_plugins.sim_action_object.SimActionObject:
                         val = val.to_claripy()
                     val_number = self.sol.eval(val, 1)[0]
-                    if val_number >= self.controlled_memory_base and \
-                        val_number < self.controlled_memory_base + self.controlled_memory_size:
+                    if self.controlled_memory_base <= val_number < self.controlled_memory_base + self.controlled_memory_size:
                         # print reg_name, val
-                        bloomed_regs.append(reg_name)
+                        bloomed_regs.append(reg_name)  # registers pointing to symbolic memory region are also considered under control
                 except:
                     traceback.print_exc()
                     import IPython; IPython.embed()
@@ -86,7 +86,7 @@ class BloomGadgetMixin:
         state.inspect.b('mem_write', when=angr.BP_BEFORE, action=self.track_writes)
         return
 
-    def run_bloom_gadget(self, state, bloom_gadget, first_constraint_func=None):
+    def run_bloom_gadget(self, state, bloom_gadget, first_constraint_func=None, previous_blooming_gadget=None):
         """
         symbolically execute the blooming gadget, and find the blooming site
         :param state:
@@ -128,7 +128,7 @@ class BloomGadgetMixin:
 
                 def my_filter_func(somestate):
                     """
-                    helper function to filter meaning less states out
+                    helper function to filter meaningless states out
                     :param somestate:
                     :return:
                     """
@@ -168,12 +168,20 @@ class BloomGadgetMixin:
                         print('[+] there are %d bloomed regsiters' % (number_of_bloomed_regs))
                         if self.require_perfect_bloom_gadget:
                             if ucstate.regs.rdi.symbolic and ucstate.regs.rsi.symbolic and ucstate.regs.rdx.symbolic:
-                                self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
-                                print 'perfect blooming! %s'%(self.current_bloom_gadget[1])
+                                if previous_blooming_gadget is not None:
+                                    self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), \
+                                                                   bloomed_regs, previous_blooming_gadget])
+                                    if self.track_good_bloom_pairs:
+                                        self.good_bloom_pairs.append([previous_blooming_gadget, self.current_bloom_gadget, bloomed_regs])
+                                else:
+                                    self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), \
+                                                                   bloomed_regs, previous_blooming_gadget])
+                                print 'perfect blooming! %s' % (self.current_bloom_gadget[1])
                                 seen_bloom_state = True
                                 print bloomed_regs
                         else:
-                            if number_of_bloomed_regs >= 3:
+                            #if number_of_bloomed_regs >= 3:
+                            if number_of_bloomed_regs >= 4:
                                 self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
                                 seen_bloom_state = True
                                 print 'blooming: %s!!!' % (self.current_bloom_gadget[1])
@@ -189,8 +197,15 @@ class BloomGadgetMixin:
                             perfect bloom gadget means rdi, rsi, rdx is all symbolic
                             """
                             if ucstate.regs.rdi.symbolic and ucstate.regs.rsi.symbolic and ucstate.regs.rdx.symbolic:
-                                self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
-                                print 'perfect blooming! %s'%(self.current_bloom_gadget[1])
+                                if previous_blooming_gadget is not None:
+                                    self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), \
+                                                               bloomed_regs, previous_blooming_gadget])
+                                    if self.track_good_bloom_pairs:
+                                        self.good_bloom_pairs.append([previous_blooming_gadget, self.current_bloom_gadget, bloomed_regs])
+                                else:
+                                    self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), \
+                                                                   bloomed_regs, previous_blooming_gadget])
+                                print 'perfect blooming! %s' % (self.current_bloom_gadget[1])
                                 seen_bloom_state = True
                                 print bloomed_regs
                         else:
@@ -233,6 +248,10 @@ class BloomGadgetMixin:
         return
 
     def multiple_runs_blooming_gadget(self):
+        """
+        iterate over all blooming gadget and try to find the good blooming state
+        :return: good_bloom_gadget containing the bloom state
+        """
         initial_state = self.get_initial_state(switch_cpu=True)
         total = len(self.bloom_gadgets)
         for i, bloom_gadget in enumerate(self.bloom_gadgets):
@@ -250,11 +269,73 @@ class BloomGadgetMixin:
         executed_time = current_time-self.start_time_of_symbolic_execution
         print '[+] symbolic execution of blooming gadget takes up to %f seconds'%(executed_time)
 
-        for good_bloom_gadget in self.good_bloom_gadget:
-            print good_bloom_gadget
-        print 'there are %d good bloom gadget verified by symbolic execution' % (len(self.good_bloom_gadget))
-        if not os.path.isfile('good_bloom_gadget.cache'):  # dump bloom gadget
-            with open('good_bloom_gadget.cache', 'wb') as f:
-                pickle.dump(self.good_bloom_gadget, f, -1)
+        self.dump_good_bloom_state()
 
+    def multiple_runs_two_stage_blooming_gadgets(self, skip_first=False, start_idx_for_second_phase=None\
+                                                 , save_memory=True):
+        """
+        iterate over all blooming gadgets in a double loop to find the good blooming state
+        :return:
+        """
+        if not skip_first:
+            initial_state = self.get_initial_state(switch_cpu=True)
+            total = len(self.bloom_gadgets)
+            # first stage
+            self.require_perfect_bloom_gadget = False  # temporarily turn off perfect requirement
+            for i, bloom_gadget in enumerate(self.bloom_gadgets):
+                print '[+] ===== checking %d/%d th bloom gadget... =====' % (i, total)
+                tmp_state = initial_state.copy()
+                if bloom_gadget[1] == 'udp_v6_early_demux':  # skip black list gadget
+                    continue
+                self.run_bloom_gadget(tmp_state, bloom_gadget, first_constraint_func=self.first_constraint_func)
+                del tmp_state
+            print 'identified %d good bloom states in first stage...' % len(self.good_bloom_gadget)
+            self.dump_good_bloom_state()
 
+        tmp_good_bloom_gadgets = list(self.good_bloom_gadget)
+        self.good_bloom_gadget = []
+
+        # Second stage
+        print 'start second stage'
+        self.require_perfect_bloom_gadget = True  # turn on our perfect requirement
+        for i, good_bloom_gadget in enumerate(tmp_good_bloom_gadgets):
+            if start_idx_for_second_phase is not None:
+                if i < start_idx_for_second_phase:
+                    continue
+            print '[+] checking %d/%d good bloom state for second bloom' % (i, len(tmp_good_bloom_gadgets))
+            ts = time.time()
+            st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+            print st,
+            print '[+] now we have found %d good bloom state via double blooming' % len(self.good_bloom_gadget)
+            old_good_bloom_states = len(good_bloom_gadget)
+            for ii, bloom_gadget in enumerate(self.bloom_gadgets):
+                if save_memory:  # improve the memory efficiency of the program
+                    for item in self.good_bloom_gadget:
+                        del item
+                    del self.good_bloom_gadget
+                    self.good_bloom_gadget = []
+                if bloom_gadget[1] == 'udp_v6_early_demux':  # skip black list gadget
+                    continue
+                print '[+] double checking %d/%d th bloom gadget...' % (ii, len(self.bloom_gadgets))
+                bloom_entry, bloom_site = self.get_blooming_gadget_entry_and_site(bloom_gadget)
+                tmp_state = good_bloom_gadget[1].copy()
+                # constraining rip to second bloom gadget
+                tmp_state.add_constraints(tmp_state.regs.rip == bloom_entry)
+                if not tmp_state.satisfiable():
+                    print "[-] can not set bloom target to second blooming gadget"
+                    return
+                self.run_bloom_gadget(tmp_state, bloom_gadget, first_constraint_func=None, previous_blooming_gadget=good_bloom_gadget[0])
+                del tmp_state
+                new_good_bloom_states = len(good_bloom_gadget) - old_good_bloom_states
+                # quick return path, return if we have enough good bloom state
+                if new_good_bloom_states > 25:
+                    break
+            self.dump_good_bloom_state_2nd_discretely(i)
+            if len(self.good_bloom_gadget) > 2000:  # we do not need too many good bloom gadget
+                break
+        del tmp_good_bloom_gadgets
+        # dump good bloom state to disk
+        self.dump_good_bloom_state_2nd()
+
+    def multiple_runs_second_stage_blooming_gadgets(self, start_idx_for_second_phase=None):
+        self.multiple_runs_two_stage_blooming_gadgets(skip_first=True, start_idx_for_second_phase=start_idx_for_second_phase)

@@ -108,6 +108,7 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin\
             , not_saving_unsatisfiable_states=True\
             , consider_rbp_disclosure_prologue_pair=True\
             , inspect_phase_2=False\
+            , track_good_bloom_pairs=False\
             ):
         self.start_addr=start_addr
         self._gadget_path=gadget_path
@@ -170,6 +171,8 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin\
         self.not_saving_unsatisfiable_states = not_saving_unsatisfiable_states
         self.consider_rbp_disclosure_prologue_pair = consider_rbp_disclosure_prologue_pair
         self.inspect_phase_2 = inspect_phase_2
+        self.track_good_bloom_pairs = track_good_bloom_pairs
+        self.good_bloom_pairs = []
 
     def getInstructionLengthByAddr(self, addr):
         tmpbb = self.b.factory.block(addr)

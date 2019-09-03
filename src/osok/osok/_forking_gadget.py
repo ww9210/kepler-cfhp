@@ -173,7 +173,7 @@ class ForkingGadgetMixin:
         :return: None
         '''
         bloom_gadget = good_bloom_gadget[0]
-        bloom_state = good_bloom_gadget[1]
+        bloom_state = good_bloom_gadget[1]  # the bloom state is stored in good_bloom_gadget
         bloom_entry, bloom_site = self.get_blooming_gadget_entry_and_site(bloom_gadget)
         fork_entry, first_fork_site, second_fork_site = self.get_forking_gadget_entry_and_sites(forking_gadget)
         if fork_entry == bloom_entry:
