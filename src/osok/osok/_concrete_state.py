@@ -1,14 +1,51 @@
 from pwn import *
 import time
 import angr
+import traceback
+from IPython import embed
 
 class ConcreteStateMixin:
-    def get_initial_state(self \
-                      , control_memory_base=0xffff880066800000 \
-                      , control_memory_size=0x1000 \
-                      , switch_cpu=True \
-                      , extra_options=None \
-                      ):
+    def get_complete_initial_state(self
+                                   , control_memory_base=0xfff880066800000
+                                   , control_memory_size=0x1000
+                                   , switch_cpu=True
+                                   , extra_options=None
+                                   , save_to_file=True):
+        """
+        Get a complete memory state from qemu backend, and pickle to disk
+        :return:
+        """
+        s = self.get_initial_state(control_memory_base, control_memory_size, switch_cpu, extra_options)
+        self.install_section(s, '.__init_rodata')
+        self.install_section(s, '.__ksymtab')
+        self.install_section(s, '.rodata')
+        self.install_current(s)
+
+        self.dump_initial_state_to_disk(s)
+        return s
+
+    def load_qemu_snapshot(self):
+        """
+        Load qemu snapshot and pause the execution
+        :return:
+        """
+        tmp_r = pwnlib.tubes.remote.remote('127.0.0.1', self.qemu_port)
+        self.statebroker.load_snapshot(tmp_r, 'initstate'+self.snapshot_prefix)
+        sleep(5)
+        tmp_r.close()
+
+    def take_qemu_snapshot(self):
+        tmp_r = pwnlib.tubes.remote.remote('127.0.0.1', self.qemu_port)
+        self.statebroker.take_snapshot(tmp_r, 'initstate'+self.snapshot_prefix)
+        sleep(5)
+        tmp_r.close()
+
+    def get_initial_state(self
+                          , control_memory_base=0xffff880066800000
+                          , control_memory_size=0x1000
+                          , switch_cpu=True
+                          , extra_options=None
+                          ):
         """
         Get a initial state by getting concrete value from the qemu instance
         :param control_memory_base:
@@ -39,6 +76,7 @@ class ConcreteStateMixin:
             print 'connecting to qemu console'
             self.r = pwnlib.tubes.remote.remote('127.0.0.1', self.qemu_port)
             self.install_context(s)
+            self.install_gs(s)  # install the gs
             self.debug_state(s)
             if switch_cpu:
                 self.statebroker.set_cpu_number(self.r, 1)
@@ -46,11 +84,22 @@ class ConcreteStateMixin:
                 self.debug_state(s)
 
             if self.expected_start_rip is not None:
-                if self.sol.eval(s.regs.rip, 1)[0] != self.expected_start_rip:
+                # has 4 cpu cores
+                if self.vm._cpu_number == 4:
+                    for i in range(4):
+                        if self.sol.eval(s.regs.rip, 1)[0] == self.expected_start_rip:
+                            break
+                        else:
+                            self.statebroker.set_cpu_number(self.r, i)
+                            s = self.install_context(s)
+
+                elif self.sol.eval(s.regs.rip, 1)[0] != self.expected_start_rip:
                     self.statebroker.set_cpu_number(self.r, 0)
                     s = self.install_context(s)
                     self.debug_state(s)
+
             else:
+                print self.expected_start_rip
                 opt = raw_input('switch cpu?[N/y]')
                 if 'y' in opt or 'Y' in opt:
                     self.statebroker.set_cpu_number(self.r, 0)
@@ -60,6 +109,7 @@ class ConcreteStateMixin:
         self.start_time_of_symbolic_execution = time.time()
 
         s = self.install_context(s)
+        self.fix_a_section(s, '.text')
         self.install_section(s, '.data')
         self.install_section(s, '.bss')
         self.install_section(s, '.brk')
@@ -69,24 +119,38 @@ class ConcreteStateMixin:
         self.r.close()
 
         # setting symbolic memory
+        self.physmap_bytes = []
         for i in range(control_memory_size):
-            s.memory.store(control_memory_base + i, s.se.BVS("exp_mem" + str(i), 8), inspect=False)
+            symbolic_byte = s.se.BVS("exp_mem" + str(i), 8)
+            self.physmap_bytes.append(symbolic_byte)
+            s.memory.store(control_memory_base + i, symbolic_byte, inspect=False)
+            s.memory.store(control_memory_base - 0x1000 + i, symbolic_byte, inspect=False)
+            s.memory.store(control_memory_base + 0x1000 + i, symbolic_byte, inspect=False)
 
         return s
 
     def install_extra_module(self, s):
-        extra_module_base = self.extra_module_base
-        extra_module_size = self.extra_module_size
-        num_of_pages = extra_module_size / 4096 + 1
-        for i in range(num_of_pages):
-            addr = extra_module_base + i * 4096
-            con = self.statebroker.get_a_page(self.r, addr)
-            if con != None:
-                print 'successfully get a page at:', hex(addr)
-                self.set_loader_concret_memory_region(s, addr, con, 4096)
-            else:
-                raw_input('failed to get a page')
-        print 'Finished installing extra modules'
+        if self.extra_module_base is not None:
+            try:
+                extra_module_base = self.extra_module_base
+                extra_module_size = self.extra_module_size
+                num_of_pages = extra_module_size / 4096 + 1
+                print 'extra module is at memory location %x of size %x' % (extra_module_base, extra_module_size)
+                for i in range(num_of_pages):
+                    addr = extra_module_base + i * 4096
+                    con = self.statebroker.get_a_page(self.r, addr)
+                    if con is not None:
+                        print 'successfully get a page at:', hex(addr)
+                        self.set_loader_concret_memory_region(s, addr, con, 4096)
+                    else:
+                        raw_input('failed to get a page')
+                print 'Finished installing extra modules'
+            except TypeError as e:
+                print e
+                traceback.print_exc()
+                embed()
+        else:
+            print 'do not need to print extra module'
         return
 
     def init_reg_concrete(self, s):
@@ -130,43 +194,14 @@ class ConcreteStateMixin:
             # print i
             addr = section_offset + i * 4096
             con = self.statebroker.get_a_page(r, addr)
-            if con != None:
+            if con is not None:
                 self.set_concret_memory_region(s, addr, con, 4096)
             else:
                 raw_input('failed to get_a_page')
         print 'Finished installing section:', name
         return
 
-    def debug_state(self, state, save_memory=True):
-        b = self.b
-        try:
-            if not save_memory:
-                irsb = b.factory.block(state.addr).vex
-                cap = b.factory.block(state.addr).capstone
-                irsb.pp()
-                cap.pp()
-        except angr.errors.SimEngineError as e:
-            print e.args, e.message
-            print 'angr.errors.SimEngineError'
-            pass
 
-    def dump_reg(self, state):
-        print 'rax:', state.regs.rax, 'r8', state.regs.r8
-        print 'rbx:', state.regs.rbx, 'r9', state.regs.r9
-        print 'rcx:', state.regs.rcx, 'r10', state.regs.r10
-        print 'rdx:', state.regs.rdx, 'r11', state.regs.r11
-        print 'rsi:', state.regs.rsi, 'r12', state.regs.r12
-        print 'rdi:', state.regs.rdi, 'r13', state.regs.r13
-        print 'rsp:', state.regs.rsp, 'r14', state.regs.r14
-        print 'rbp:', state.regs.rbp, 'r15', state.regs.r15
-        print 'gs:', state.regs.gs
-        return
-
-    def debug_simgr(self, simgr, save_memory=True):
-        print 'dumping active'
-        if not save_memory:
-            for state in simgr.stashes['active']:
-                self.debug_state(state, save_memory)
 
     def set_loader_concret_memory_region(self, s, addr, buf, length):
         aligned_addr = addr & 0xfffffffffffff000
@@ -175,6 +210,7 @@ class ConcreteStateMixin:
             self.b.loader.memory.add_backer(aligned_addr, buf)
         except ValueError:
             print('ValueError: Address is already backed!')
+            embed()
             pass
 
     def set_concret_memory_region(self, s, addr, buf, length):
@@ -190,11 +226,12 @@ class ConcreteStateMixin:
         r = self.r
         gs_addr = self.sol.eval(s.regs.gs, 1)[0]
         print 'install gs %x...' % (gs_addr)
-        con = self.statebroker.get_a_page(r, gs_addr)
-        if con != None:
-            self.set_concret_memory_region(s, gs_addr, con, 4096)
-        else:
-            raw_input('failed to get gs')
+        for idx in range(2):
+            con = self.statebroker.get_a_page(r, gs_addr + idx * 4096)
+            if con is not None:
+                self.set_concret_memory_region(s, gs_addr + idx * 4096, con, 4096)
+            else:
+                raw_input('failed to get gs')
         print 'finished installing gs'
 
     def install_stack(self, s):
@@ -202,7 +239,7 @@ class ConcreteStateMixin:
         rsp_addr = self.sol.eval(s.regs.rsp, 1)[0]
         print 'install rsp...'
         con = self.statebroker.get_a_page(r, rsp_addr)
-        if con != None:
+        if con is not None:
             self.set_concret_memory_region(s, rsp_addr, con, 4096)
         else:
             raw_input('failed to get stack')
@@ -231,17 +268,34 @@ class ConcreteStateMixin:
                         raw_input('wtf read from symbolic address')
                 # print 'checking whether memory is uninitialized...'
                 t = state.memory.load(state.inspect.mem_read_address, size=1, inspect=False)
-                if (t.uninitialized and not state.inspect.mem_read_address.symbolic):
+                if t.uninitialized and not state.inspect.mem_read_address.symbolic:
                     print 'memory content uninit: ', t.uninitialized, \
                         'memory content symbolic: ', t.symbolic
                     print '[+] uninitialized memory read found:', state.inspect.mem_read_address
                     print '[+] the uninitialized memory read is at:', hex(state.addr)
+
+                    # eliminate SMAP violation read
+                    if self.sol.eval(state.inspect.mem_read_address.get_bytes(0, 8), 1)[0] < 0xffff880000000000:
+                        print 'SMAP vialation, not going to resolving'
+                        state.regs.ip = 0
+                        return
+
                     if self.resolve_uninit:
                         r = None
                         try:
                             r = remote('127.0.0.1', self.qemu_port)
+                        except PwnlibException as e:
+                            print e
+                            print 'fail to connect to vm, try restarting'
+                            print 'sleeping 30 seconds'
+                            sleep(30)
+                            self.vm.run(test_connection=False)
+                            self.load_qemu_snapshot()
+                            sleep(5)
+                            r = remote('127.0.0.1', self.qemu_port)
+                        try:
                             addr = self.sol.eval(state.inspect.mem_read_address.get_bytes(0, 8), 1)[0]
-                            if self.controlled_memory_base <= addr < (self.controlled_memory_base + \
+                            if self.controlled_memory_base <= addr < (self.controlled_memory_base +
                                                                       self.controlled_memory_size):
                                 r.close()
                                 pass
@@ -249,21 +303,26 @@ class ConcreteStateMixin:
                                 print '[+] resolving a page containing the address:', hex(addr)
                                 con = self.statebroker.get_a_page(r, addr)
                                 r.close()
-                                if con != None:
+                                if con is not None:  # success memory resolving
                                     self.set_concret_memory_region(state, addr, con, 4096)
                                     print '[+] resolved the uninit with concrete page'
                                 else:
                                     print('[!] failed to resolve the uninit memory')
+
                                     if self.pause_on_failed_memory_resolving:
                                         for addr in state.history_iterator:
                                             print addr
                                         # import IPython; IPython.embed()
+                                    state.regs.ip = 0
+                                    return
                             if self.pause_on_finish_memory_loading:
                                 raw_input('do the read now(continue) <-')
-                        except:
+                        except PwnlibException as e:  # catch options
+                            print e
+                            traceback.print_exc()
                             if r is not None:
                                 r.close()
-                            print 'failed in resolving'
+                            print 'failed in resolving, we do not handle here~'
                             pass
                 else:
                     # print 'Memory content does not appear uninitialized'

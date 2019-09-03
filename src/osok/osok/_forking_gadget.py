@@ -1,6 +1,7 @@
 import colorama
 import traceback
 import angr
+from state_filters import *
 class ForkingGadgetMixin:
     def enforce_fork_on_bloom(self, state):
         fork_gadget = self.current_forking_gadget
@@ -89,7 +90,7 @@ class ForkingGadgetMixin:
 
     def reach_second_fork_site_callback(self, state):
         """
-        callback function at the 2nd fork site(2nd is only an index, does not mean the site is reached first
+        callback function at the 2nd fork site (2nd is only an index, does not mean the site is reached first
         :param state:
         :return:
         """
@@ -110,8 +111,8 @@ class ForkingGadgetMixin:
             print 'found good bloom fork pair'
             constraints = list(state.se.constraints)
             self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)\
-                        , constraints \
-                        , list(state.osokplugin.constraints_at_firstly_reached_site) \
+                        , constraints
+                        , list(state.osokplugin.constraints_at_firstly_reached_site)
                         , list(state.osokplugin.history_bbls_to_firstly_reached_fork_site), 4])
             return
 
@@ -124,9 +125,9 @@ class ForkingGadgetMixin:
         if state.osokplugin.reach_first_fork_site:
             print 'found good bloom fork pair'
             constraints = list(state.se.constraints)
-            self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)\
-                    , constraints\
-                    , list(state.osokplugin.constraints_at_firstly_reached_site)\
+            self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)
+                    , constraints
+                    , list(state.osokplugin.constraints_at_firstly_reached_site)
                     , list(state.osokplugin.history_bbls_to_firstly_reached_fork_site), 1])
         #import IPython; IPython.embed()
         return
@@ -234,12 +235,12 @@ class ForkingGadgetMixin:
             #for active_state in simgr.active:
                 #if active_state.osokplugin.reach_second_fork_site and active_state.osokplugin.reach_first_fork_site:
 
-            if self.reach_current_bloom_site == True:
+            if self.reach_current_bloom_site is True:
                 print('reached the bloom site, next going to reach forking site')
 
-            if self.reach_current_bloom_site == True:
+            if self.reach_current_bloom_site is True:
                 print('reached bloom site')
-                if self.reach_current_fork_gadget == True:
+                if self.reach_current_fork_gadget is True:
                     print('reached fork gadget')
 
             #elif self.loop_idx_forking_stage > 7 and not self.reach_current_bloom_site:

@@ -1,4 +1,5 @@
 import colorama
+from IPython import embed
 class DisclosureGadgetMixin:
     def decide_disclosure_landing_site(self, prologue_signature, hotmap, sub_gadget_entry):
         """
@@ -57,21 +58,26 @@ class DisclosureGadgetMixin:
         if state.regs.rdx.symbolic:
             print 'rdx is symbolic'
         else:
-            print '[-] does not satisfy disclosure requirement because rdx is not symbolic'
+            print '[-] does not satisfy disclosure requirement because rdx is not symbolic',
+            print 'rdx:', state.regs.rdx
             return
         tmp_state = state.copy()
-        tmp_state.add_constraints(tmp_state.regs.rdi < 0x7fff00000000)
-        #tmp_state.add_constraints(tmp_state.regs.rdx < 0x200)
+        tmp_state.add_constraints(tmp_state.regs.rdi < 0x7fff00000000)  # UPPER bound of user space
+        tmp_state.add_constraints(tmp_state.regs.rdi > 0x10000)  # minimal mappable page
+        minimal_rdx = self.current_disclosure_gadget[1]+8
+        tmp_state.add_constraints(tmp_state.regs.rdx > minimal_rdx - 1)  # we do not want rdx to be too large
+        tmp_state.add_constraints(tmp_state.regs.rdx < 0x200)  # we do not want rdx to be too large
         if tmp_state.satisfiable():
             print 'blooming gadget:', self.current_bloom_gadget[1]
             print 'forking gadget:', self.current_forking_gadget[1]
             print 'prologue gadget:', self.current_prologue_gadget[5]
             print 'disclosure gadget:', self.current_disclosure_gadget[3]
-            print colorama.Fore.RED + '[+] disclosure requirement fullfilled' + colorama.Style.RESET_ALL
+            print colorama.Fore.RED + '[+] disclosure requirement satisfied' + colorama.Style.RESET_ALL
             state.osokplugin.has_good_disclosure_site = True
-            #import IPython; IPython.embed()
+            # embed()
         else:
             print '[-] does not satisfy disclosure requirement'
+            state.osokplugin.should_get_killed = True
         del tmp_state
         return
 
@@ -83,13 +89,15 @@ class DisclosureGadgetMixin:
         """
         print '[+] reaching the disclosure site'
         if state.regs.rsi.symbolic:
-            print 'rsi is symbilic, it is not good because we need rsi points to stack...'
+            print 'rsi is symbolic, it is not good because we need rsi points to stack...'
+            state.osokplugin.should_get_killed = True
         else:
             if self.is_stack_address(state.se.eval(state.regs.rsi)):
                 print colorama.Fore.YELLOW + 'rsi points to stack, sounds good, needs further check'\
                       + colorama.Style.RESET_ALL
-                #check if current state satisfy disclosure requirement
+                # checking if current state satisfy disclosure requirement
                 self.check_disclosure_requirements(state)
             else:
-                print 'rsi does not point to stack..., let\'s do some dirty trick to kill the state'
+                print 'rsi does not point to stack...'
+                state.osokplugin.should_get_killed = True
         return

@@ -19,6 +19,13 @@ class GadgetAnalysisMixin:
         get paired prologue and disclosure gadget
         :return:
         """
+        """
+        fake stack gadget:
+        has_canary, has_indirect_call, num_saved_registers, canary_type ,canary_location, funcname, funcea, stack_size]
+        
+        disclosure gadget:
+        num_saved_registers, canary_location, canary_type, func_name, data_flow_sig, reversed_instruction, stack_size
+        """
         fake_stack_gadgets = self.fake_stack_gadgets
         disclosure_gadgets = self.disclosure_gadgets
         res = []
@@ -28,11 +35,11 @@ class GadgetAnalysisMixin:
                 if fake_stack_gadget[2] == disclosure_gadget[0]:
                     # has the same canary type and not none
                     if fake_stack_gadget[3] == disclosure_gadget[2] and fake_stack_gadget[3] != '':
-                        if fake_stack_gadget[3] == 'rsp' and fake_stack_gadget[4] < disclosure_gadget[1] \
-                                and (fake_stack_gadget[4] - disclosure_gadget[1]) == -8:
-                            # todo
-                            # and (fake_stack_gadget[4]-disclosure_gadget[1])%8 == 0:
-                            res.append([fake_stack_gadget, disclosure_gadget])
+                        # if fake_stack_gadget[3] == 'rsp' and fake_stack_gadget[4] < disclosure_gadget[1] \
+                                #and (fake_stack_gadget[4] - disclosure_gadget[1]) == -8:
+                        if fake_stack_gadget[3] == 'rsp' and fake_stack_gadget[4] == disclosure_gadget[1] - 8 \
+                                and fake_stack_gadget[2] == disclosure_gadget[0]:
+                                res.append([fake_stack_gadget, disclosure_gadget])
                         if self.consider_rbp_disclosure_prologue_pair:  # consider rbp disclosure prologue pair
                             if fake_stack_gadget[3] == 'rbp' and fake_stack_gadget[4] == disclosure_gadget[1]:
                                 if fake_stack_gadget[7] + 8 == disclosure_gadget[6]:
@@ -68,6 +75,19 @@ class GadgetAnalysisMixin:
                             hotmap[2] = cnt
                             cnt += 1
                     # print(sig)
+
+            if sig['type'] == LEA_MEM_TO_REG:
+                if sig['dst'] in interested_opnd:
+                    if sig['dst'] in ['rsi', 'esi']:
+                        if not hotmap[1]:
+                            sub_gadget_entry[1] = sig['addr']
+                            hotmap[1] = cnt
+                            cnt += 1
+                    if sig['dst'] in ['rdi', 'edi']:
+                        if not hotmap[0]:
+                            sub_gadget_entry[0] = sig['addr']
+                            hotmap[0] = cnt
+                            cnt += 1
         return hotmap, sub_gadget_entry
 
 

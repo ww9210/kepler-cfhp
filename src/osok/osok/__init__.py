@@ -1,5 +1,6 @@
 """
-osok version 3
+osok beta
+author: Wei Wu ww9210
 Principles:
 1. modularize the phases, maybe refactor the workflow into invocation of different classes
 2. figure out the input and output of each phase
@@ -8,18 +9,14 @@ import angr
 from capstone import *
 from angr import concretization_strategies
 import claripy
-import traceback
 from pwn import *
 import sys
 sys.path.append('/home/ww9210/develop/concolic_execution')
 import statebroker
-import colorama
 import pickle
 import os
 from os import listdir
 from os.path import isfile, join
-import datetime
-import time
 import state_filters
 import _concrete_state
 import _pickle_states
@@ -31,25 +28,34 @@ import _prologue_gadget
 import _smash_gadget
 import _symbolic_tracing
 import _exploit_routine
+import _exploit_routine_dfs
+import _state_resolver
+import _debug_utility
+import _payload_generation
+import _exploit_generation
 
 
-class OneShotExploit(object, _concrete_state.ConcreteStateMixin\
-                     , _pickle_states.PickleStatesMixin\
-                     , _gadget_analysis.GadgetAnalysisMixin\
-                     , _bloom_gadget.BloomGadgetMixin\
-                     , _forking_gadget.ForkingGadgetMixin\
-                     , _prologue_gadget.PrologueGadgetMixin\
-                     , _disclosure_gadget.DisclosureGadgetMixin\
-                     , _smash_gadget.SmashGadgetMixin\
-                     , _symbolic_tracing.SymbolicTracingMixin\
-                     , _exploit_routine.ExploitRoutineMixin\
+class OneShotExploit(object, _concrete_state.ConcreteStateMixin
+                     , _pickle_states.PickleStatesMixin
+                     , _gadget_analysis.GadgetAnalysisMixin
+                     , _bloom_gadget.BloomGadgetMixin
+                     , _forking_gadget.ForkingGadgetMixin
+                     , _prologue_gadget.PrologueGadgetMixin
+                     , _disclosure_gadget.DisclosureGadgetMixin
+                     , _smash_gadget.SmashGadgetMixin
+                     , _symbolic_tracing.SymbolicTracingMixin
+                     , _exploit_routine.ExploitRoutineMixin
+                     , _exploit_routine_dfs.ExploitRoutineDFSMixin
+                     , _state_resolver.StateResolverMixin
+                     , _debug_utility.DebugUtilityMixin
+                     , _payload_generation.PayloadGenerationMixin
+                     , _exploit_generation.ExploitGenererationMixin
                      ):
     def __init__(self, kernel_path=None):
-        '''
+        """
         :param kernel_path: the vmlinux path to the kernel
-        '''
-        self.kernel_path=kernel_path
-        #self.b = angr.Project(kernel_path, support_selfmodifying_code=True)
+        """
+        self.kernel_path = kernel_path
         if os.path.isfile('angr_project.cache'):
             with open('angr_project.cache','rb') as f:
                 print '[+] deserilizing vmlinux from pickle dump'
@@ -64,51 +70,63 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin\
         self.sol = claripy.Solver()
         self.md = Cs(CS_ARCH_X86, CS_MODE_64)
         self.md.detail = True
+        self.debug_bloom_verbose = False
+        self.vm = None
+        self.reproduce_mode = False  # reproduce exploit and generate payload
+        self.custom_rop_gadget_number = 10  # length of the rop payload we want to use
 
     def do_nothing(self, state):
         pass
 
-    def setup(self, gadget_path=None \
-            , start_addr=None \
-            , debug_qemu_backend=True\
-            , function_call_to_disable=None\
-            , qemu_port=9210\
-            , limit_loop=False\
-            , pause_on_each_step=False\
-            , add_bloom_instrumentation=True\
-            , add_forking_instrumentation=True\
-            , add_prologue_instrumentation=True\
-            , execution_time_limit=99999\
-            , debug_irsb=True\
-            , pause_on_read_from_symbolic_address=False\
-            , resolve_uninit=True\
-            , pause_on_failed_memory_resolving=True\
-            , pause_on_finish_memory_loading=False\
-            , pause_on_enforce_fork_on_bloom=False\
-            , pause_on_prologue_on_fork=False\
-            , expected_start_rip=None\
-            , extra_module_base=None\
-            , extra_module_size=None\
-            , first_constraint_func=None\
-            , controlled_memory_base=None\
-            , controlled_memory_size=None\
-            , start_bloom_gadget_index=0\
-            , boost_via_reconstraining_with_old_state=True\
-            , require_perfect_bloom_gadget=True\
-            , serilize_good_bloom_fork_gadget_pair=True\
-            , use_controlled_data_concretization=True\
-            , has_custom_concretization_strategy=True\
-            , explore_smash_gadget=False\
-            , dump_good_disclosure_state_discretely=True\
-            , dump_good_disclosure_state_together=False\
-            , dump_good_smash_state_together=True\
-            , use_precomputed_disclosure_state=False\
-            , use_precomputed_good_bloom_and_fork_pair=False\
-            , fast_path_for_disclosure_state=False\
-            , not_saving_unsatisfiable_states=True\
-            , consider_rbp_disclosure_prologue_pair=True\
-            , inspect_phase_2=False\
-            , track_good_bloom_pairs=False\
+    def setup(self, gadget_path=None
+            , start_addr=None
+            , debug_qemu_backend=True
+            , function_call_to_disable=None
+            , qemu_port=9210
+            , limit_loop=False
+            , pause_on_each_step=False
+            , add_bloom_instrumentation=True
+            , add_forking_instrumentation=True
+            , add_prologue_instrumentation=True
+            , execution_time_limit=99999
+            , debug_irsb=True
+            , pause_on_read_from_symbolic_address=False
+            , resolve_uninit=True
+            , pause_on_failed_memory_resolving=True
+            , pause_on_finish_memory_loading=False
+            , pause_on_enforce_fork_on_bloom=False
+            , pause_on_prologue_on_fork=False
+            , expected_start_rip=None
+            , extra_module_base=None
+            , extra_module_size=None
+            , first_constraint_func=None
+            , controlled_memory_base=None
+            , controlled_memory_size=None
+            , start_bloom_gadget_index=0
+            , boost_via_reconstraining_with_old_state=True
+            , require_perfect_bloom_gadget=True
+            , serilize_good_bloom_fork_gadget_pair=True
+            , use_controlled_data_concretization=True
+            , has_custom_concretization_strategy=True
+            , explore_smash_gadget=False
+            , dump_good_disclosure_state_discretely=True
+            , dump_good_disclosure_state_together=False
+            , dump_good_smash_state_together=True
+            , use_precomputed_disclosure_state=False
+            , use_precomputed_good_bloom_and_fork_pair=False
+            , fast_path_for_disclosure_state=False
+            , not_saving_unsatisfiable_states=True
+            , consider_rbp_disclosure_prologue_pair=True
+            , inspect_phase_2=False
+            , track_good_bloom_pairs=False
+            , debug_bloom_verbose=False
+            , concretization_range=2
+            , has_indirect_call_thunk=True
+            , vm=None
+            , payload_path='./payloads'
+            , pause_on_init_state=False
+            , use_extended_auxiliary_gadget=False
+            , snapshot_prefix=''
             ):
         self.start_addr=start_addr
         self._gadget_path=gadget_path
@@ -173,13 +191,27 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin\
         self.inspect_phase_2 = inspect_phase_2
         self.track_good_bloom_pairs = track_good_bloom_pairs
         self.good_bloom_pairs = []
+        self.debug_bloom_verbose = debug_bloom_verbose
+        self.has_indirect_call_thunk = has_indirect_call_thunk
+        self.concretization_range = concretization_range
+        self.pause_on_init_state = pause_on_init_state
+        self.use_extended_auxiliary_gadget = use_extended_auxiliary_gadget
+        self.snapshot_prefix=snapshot_prefix
+        self.payload_path = payload_path
+        mypath = payload_path
+        onlyfiles = [f for f in listdir(mypath) if isfile(join(mypath, f))]
+        f_cnt = 0
+        for fn in onlyfiles:
+            if 'info_' in fn:
+                f_cnt += 1
+        self.num_of_generate_payload = f_cnt
+        self.vm = vm
 
     def getInstructionLengthByAddr(self, addr):
         tmpbb = self.b.factory.block(addr)
         if tmpbb.size > 5:
             print 'wtf tmpbb size >  5'
-            import IPython;
-            IPython.embed()
+            import IPython; IPython.embed()
         # call __x86_indirect_thunk_rax
         assert tmpbb.size <= 5
         return tmpbb.size
@@ -197,12 +229,15 @@ class OneShotExploit(object, _concrete_state.ConcreteStateMixin\
         :return:
         """
         if self.has_custom_concretization_strategy:
-            state.memory.read_strategies.insert(0, \
-                angr.concretization_strategies.mycontrolled_data.MySimConcretizationStrategyControlledData(\
+            state.memory.read_strategies.insert(0,
+                concretization_strategies.mycontrolled_data.MySimConcretizationStrategyControlledData(
                     1, [ ]))
+
+            state.memory.write_strategies.insert(0,
+                                                concretization_strategies.mycontrolled_data.MySimConcretizationStrategyControlledData(
+                                                    1, [ ]))
         else:
-            #state.memory.read_strategies.insert(2, \
-            state.memory.read_strategies.insert(0, \
-                            angr.concretization_strategies.controlled_data.SimConcretizationStrategyControlledData( \
-                            1, [0xffff880066800000]))
+            state.memory.read_strategies.insert(0,
+                concretization_strategies.controlled_data.SimConcretizationStrategyControlledData(
+                    1, [0xffff880066800000]))
         return
