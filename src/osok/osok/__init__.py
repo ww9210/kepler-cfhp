@@ -1,3 +1,8 @@
+"""
+osok version 2
+Principles:
+1.reuse states as much as possible
+"""
 import angr
 from capstone import *
 from angr import concretization_strategies
@@ -15,6 +20,8 @@ import pickle
 import os
 from os import listdir
 from os.path import isfile, join
+import datetime
+import time
 
 claripy = claripy
 sol = claripy.Solver()
@@ -122,6 +129,9 @@ class OneShotExploit(object):
             , use_precomputed_disclosure_state=False\
             , use_precomputed_good_bloom_and_fork_pair=False\
             , fast_path_for_disclosure_state=False\
+            , not_saving_unsatisfiable_states=True\
+            , consider_rbp_disclosure_prologue_pair=True\
+            , inspect_phase_2=False\
             ):
         self.start_addr=start_addr
         self._gadget_path=gadget_path
@@ -151,7 +161,7 @@ class OneShotExploit(object):
         self.reach_current_fork_gadget = None
         self.reach_current_first_fork_site = None
         self.reach_current_second_fork_site = None
-        self.good_bloom_gadget = [] #godd bloom filter
+        self.good_bloom_gadget = []  # good bloom filter
         self.good_bloom_fork_gadget_pair = []
         self.current_bloom_gadget = None
         self.current_forking_gadget = None
@@ -181,6 +191,9 @@ class OneShotExploit(object):
         self.tmp_good_disclosure_state_number = 0
         self.dump_good_smash_state_together = dump_good_smash_state_together
         self.use_precomputed_good_bloom_and_fork_pair = use_precomputed_good_bloom_and_fork_pair
+        self.not_saving_unsatisfiable_states = not_saving_unsatisfiable_states
+        self.consider_rbp_disclosure_prologue_pair = consider_rbp_disclosure_prologue_pair
+        self.inspect_phase_2 = inspect_phase_2
 
     def get_initial_state(self\
             , control_memory_base=0xffff880066800000\
@@ -189,7 +202,7 @@ class OneShotExploit(object):
             , extra_options = None\
             ):
 
-        start_addr= self.start_addr
+        start_addr = self.start_addr
 
         extras = {angr.options.REVERSE_MEMORY_NAME_MAP, \
                     angr.options.TRACK_ACTION_HISTORY, \
@@ -200,10 +213,10 @@ class OneShotExploit(object):
         if extra_options:
             extras.add(extra_options)
 
-        #create new state 
+        # create new state
         s = self.b.factory.blank_state(addr = self.start_addr, add_options = extras)
 
-        if self.function_call_to_disable != None:
+        if self.function_call_to_disable is not None:
             for addr in self.function_call_to_disable:
                 self.b.hook(addr, self.do_nothing, 5)
 
@@ -388,7 +401,7 @@ class OneShotExploit(object):
         """
         fake_stack_gadgets = self.fake_stack_gadgets
         disclosure_gadgets = self.disclosure_gadgets
-        res=[]
+        res = []
         for fake_stack_gadget in fake_stack_gadgets:
             for disclosure_gadget in disclosure_gadgets:
                 # have the same number of saved of registers
@@ -400,9 +413,12 @@ class OneShotExploit(object):
                                 # todo
                                 #and (fake_stack_gadget[4]-disclosure_gadget[1])%8 == 0:
                             res.append([fake_stack_gadget, disclosure_gadget])
-                        #if fake_stack_gadget[3]=='rbp' and fake_stack_gadget[4] ==  disclosure_gadget[1]:
-                            #res.append([fake_stack_gadget,disclosure_gadget])
-        print('there are %d pairs of gadgets:'%(len(res)))
+                        if self.consider_rbp_disclosure_prologue_pair:  # consider rbp disclosure prologue pair
+                            if fake_stack_gadget[3]=='rbp' and fake_stack_gadget[4] == disclosure_gadget[1]:
+                                if fake_stack_gadget[7] + 8 == disclosure_gadget[6]:
+                                    res.append([fake_stack_gadget, disclosure_gadget])
+                                # res.append([fake_stack_gadget,disclosure_gadget])
+        print('there are %d pairs of gadgets:' % (len(res)))
         return res
 
     def analyze_disclosure_gadget_data_flow_signature(self, disclosure_gadget):
@@ -485,29 +501,41 @@ class OneShotExploit(object):
                     if self.pause_on_read_from_symbolic_address:
                         raw_input('wtf read from symbolic address')
                 #print 'checking whether memory is uninitialized...'
-                t=state.memory.load(state.inspect.mem_read_address,size=1,inspect=False)
+                t=state.memory.load(state.inspect.mem_read_address, size=1, inspect=False)
                 if (t.uninitialized and not state.inspect.mem_read_address.symbolic):
                     print 'memory content uninit: ', t.uninitialized, \
                             'memory content symbolic: ', t.symbolic
                     print '[+] uninitialized memory read found:', state.inspect.mem_read_address
                     print '[+] the uninitialized memory read is at:', hex(state.addr)
                     if self.resolve_uninit:
-                        r = remote('127.0.0.1', self.qemu_port)
-                        addr = self.sol.eval(state.inspect.mem_read_address.get_bytes(0,8),1)[0]
-                        print '[+] resolving a page containing the address:', hex(addr)
-                        con = self.statebroker.get_a_page(r, addr)
-                        r.close()
-                        if con != None:
-                            self.set_concret_memory_region(state, addr, con, 4096)
-                            print '[+] resolved the uninit with concrete page'
-                        else:
-                            print( '[!] failed to resolve the uninit memory')
-                            if self.pause_on_failed_memory_resolving:
-                                for addr in state.history_iterator:
-                                    print addr
-                                #import IPython; IPython.embed()
-                        if self.pause_on_finish_memory_loading:
-                            raw_input('do the read now(continue) <-')
+                        r = None
+                        try:
+                            r = remote('127.0.0.1', self.qemu_port)
+                            addr = self.sol.eval(state.inspect.mem_read_address.get_bytes(0, 8), 1)[0]
+                            if self.controlled_memory_base <= addr < (self.controlled_memory_base + \
+                                self.controlled_memory_size):
+                                r.close()
+                                pass
+                            else:
+                                print '[+] resolving a page containing the address:', hex(addr)
+                                con = self.statebroker.get_a_page(r, addr)
+                                r.close()
+                                if con != None:
+                                    self.set_concret_memory_region(state, addr, con, 4096)
+                                    print '[+] resolved the uninit with concrete page'
+                                else:
+                                    print( '[!] failed to resolve the uninit memory')
+                                    if self.pause_on_failed_memory_resolving:
+                                        for addr in state.history_iterator:
+                                            print addr
+                                        #import IPython; IPython.embed()
+                            if self.pause_on_finish_memory_loading:
+                                raw_input('do the read now(continue) <-')
+                        except:
+                            if r is not None:
+                                r.close()
+                            print 'failed in resolving'
+                            pass
                 else:
                     #print 'Memory content does not appear uninitialized'
                     pass
@@ -537,13 +565,13 @@ class OneShotExploit(object):
                     if type(val) == angr.state_plugins.sim_action_object.SimActionObject:
                         val = val.to_claripy()
                     val_number = self.sol.eval(val,1)[0]
+                    if val_number >= self.controlled_memory_base and \
+                        val_number < self.controlled_memory_base + self.controlled_memory_size:
+                        #print reg_name, val
+                        bloomed_regs.append(reg_name)
                 except:
                     traceback.print_exc()
                     import IPython; IPython.embed()
-                if val_number >= self.controlled_memory_base and \
-                        val_number < self.controlled_memory_base + self.controlled_memory_size:
-                    #print reg_name, val
-                    bloomed_regs.append(reg_name)
 
             #import IPython; IPython.embed()
         #return len(bloomed_regs)
@@ -559,7 +587,7 @@ class OneShotExploit(object):
 
         current_gadget = self.current_bloom_gadget
 
-        if self.sol.eval(state.ip,1)[0] == current_gadget[2]:#TODO: isn't check redundent
+        if self.sol.eval(state.ip,1)[0] == current_gadget[2]:  # TODO: isn't check redundent
             self.reach_current_bloom_site = True
 
         #calculating bloomed registers
@@ -575,11 +603,12 @@ class OneShotExploit(object):
 
         if state.regs.rdi.symbolic and state.regs.rsi.symbolic and state.regs.rdx.symbolic:
             self.good_bloom_gadget.append([self.current_bloom_gadget, state.copy(), bloomed_regs])
-            print 'perfect bloomging! %s'%(self.current_bloom_gadget[1])
+            print 'perfect blooming! %s'%(self.current_bloom_gadget[1])
             print bloomed_regs
             #import IPython; IPython.embed()
-        return 
+        return
 
+    '''
     def call_check_bloom_regs(self, state):
         print('='*78)
         print('Call instruction at:', state.inspect.function_address)
@@ -605,15 +634,16 @@ class OneShotExploit(object):
                     self.reach_current_bloom_site = True
                     print bloomed_regs
         return 
+    '''
          
     def instrument_bloom(self, state, bloom_entry, bloom_site, \
                                              bloom_gadget, symbolic_regs=['rdi']):
         #state.inspect.b('instruction', when=angr.BP_BEFORE\
-        state.inspect.b('call', when=angr.BP_BEFORE\
-                , instruction = bloom_site\
-                , action=self.call_check_bloom_regs)
+        #state.inspect.b('call', when=angr.BP_BEFORE\
+                #, instruction = bloom_site\
+                #, action=self.call_check_bloom_regs)
                 #, action=self.check_bloom_regs)
-        state.inspect.b('mem_read',when=angr.BP_BEFORE, action=self.track_reads)
+        state.inspect.b('mem_read', when=angr.BP_BEFORE, action=self.track_reads)
         state.inspect.b('mem_write', when=angr.BP_BEFORE, action=self.track_writes)
         return 
 
@@ -626,7 +656,7 @@ class OneShotExploit(object):
         if self.add_bloom_instrumentation:
             self.instrument_bloom(state, bloom_entry, bloom_site, bloom_gadget)
 
-        if first_constraint_func != None:
+        if first_constraint_func is not None:
             first_constraint_func(state, bloom_entry)
 
         if self.use_controlled_data_concretization:#use controlled_data_concretization
@@ -641,22 +671,23 @@ class OneShotExploit(object):
             #simgr.use_technique(llimiter)
             pass
         loop_idx = 0
+        seen_bloom_state=False
         while True:
             print '[+] '+str(loop_idx)+' step()'
             self.debug_simgr(simgr)
             try:
                 simgr.step()
                 print 'inspecting simgr...'
+                print simgr.active
+
                 def my_filter_func(somestate):
                     ip = sol.eval(somestate.ip,1)[0]
-                    if ip in [0xffff880066800000,0]:
+                    if ip in [0xffff880066800000, 0]:
                         return True
                     if ip < 0x7fffffffffff:
                         return True
                     return False
-
-                simgr.move(from_stash='active',to_stash='deadended',filter_func=my_filter_func)
-
+                simgr.move(from_stash='active', to_stash='deadended', filter_func=my_filter_func)
                 #import IPython; IPython.embed()
             except:
                 print 'wtf simgr error'
@@ -667,8 +698,65 @@ class OneShotExploit(object):
                 return
 
             loop_idx += 1
+            if simgr.unconstrained:  # has unconstrained state
+                print('[+] dumping unconstrained states')
+                for ucstate in simgr.unconstrained:
+                    # TODO:does this typical happens when indirect jump e.g jmp rdx?
+                    # for addr in ucstate.history_iterator:
+                        # print addr
+                    xxx = reversed(ucstate.history_iterator)
+                    xxx.next()
+                    xx = xxx.next()
+                    second_to_last_history = xx.addr
+                    if bloom_site in self.b.factory.block(ucstate.history.addr).instruction_addrs:
+                        # if the unconstrained state is generated from the bloom_site
+                        print 'reached current bloom site'
+                        self.reach_current_bloom_site = True
+                        bloomed_regs = self.get_number_of_bloomed_regs(ucstate)
+                        number_of_bloomed_regs = len(bloomed_regs)
+                        print('[+] there are %d bloomed regsiters' % (number_of_bloomed_regs))
+                        if self.require_perfect_bloom_gadget:
+                            if ucstate.regs.rdi.symbolic and ucstate.regs.rsi.symbolic and ucstate.regs.rdx.symbolic:
+                                self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
+                                print 'perfect blooming! %s'%(self.current_bloom_gadget[1])
+                                seen_bloom_state = True
+                                print bloomed_regs
+                        else:
+                            if number_of_bloomed_regs >= 3:
+                                self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
+                                seen_bloom_state = True
+                                print 'blooming: %s!!!' % (self.current_bloom_gadget[1])
+                    elif bloom_site in self.b.factory.block(second_to_last_history).instruction_addrs:
+                        # if the unconstrained state is generated from the bloom_site and a call stub
+                        print 'reached current bloom site too'
+                        self.reach_current_bloom_site = True
+                        bloomed_regs = self.get_number_of_bloomed_regs(ucstate)
+                        number_of_bloomed_regs = len(bloomed_regs)
+                        print('[+] there are %d bloomed regsiters' % number_of_bloomed_regs)
+                        if self.require_perfect_bloom_gadget:
+                            if ucstate.regs.rdi.symbolic and ucstate.regs.rsi.symbolic and ucstate.regs.rdx.symbolic:
+                                self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
+                                print 'perfect blooming! %s'%(self.current_bloom_gadget[1])
+                                seen_bloom_state = True
+                                print bloomed_regs
+                        else:
+                            if number_of_bloomed_regs >= 3:
+                                self.good_bloom_gadget.append([self.current_bloom_gadget, ucstate.copy(), bloomed_regs])
+                                seen_bloom_state = True
+                                print 'blooming: %s!!!' % (self.current_bloom_gadget[1])
+                    else:
+                        print 'unexpected unconstrained state, removing...'
+                        #import IPython; IPython.embed()
+                        simgr.unconstrained.remove(ucstate)
 
-            if self.reach_current_bloom_site == True:
+                print '[+] end of dumping unconstrainted states'
+                print('[+] wtf has unconstrained states')
+                # import IPython; IPython.embed()
+                if seen_bloom_state:
+                    del simgr
+                    return
+
+            if self.reach_current_bloom_site is True:
                 print('next bloom gadget?')
                 del simgr
                 return 
@@ -678,24 +766,8 @@ class OneShotExploit(object):
                 del simgr
                 return
 
-            if len(simgr.active)==0:
+            if len(simgr.active) == 0:
                 print('no active states left, wtf..')
-                #import IPython; IPython.embed()
-                del simgr
-                return
-
-            if simgr.unconstrained:
-                print('[+] dumping unconstrained states')
-
-                for ucstate in simgr.unconstrained:
-                    #TODO:does this typical happens when indirect jump e.g jmp rdx?
-                    for addr in ucstate.history_iterator:
-                        print addr
-                    #self.check_bloom_regs(ucstate)
-                    self.call_check_bloom_regs(ucstate)
-
-                print '[+] end of dumping unconstrainted states'
-                print('[+] wtf has unconstrained states')
                 #import IPython; IPython.embed()
                 del simgr
                 return
@@ -706,12 +778,12 @@ class OneShotExploit(object):
         del simgr
         return 
 
-    def multiple_runs_blooming_gadget(self, RDI=None):
+    def multiple_runs_blooming_gadget(self):
         initial_state = self.get_initial_state(switch_cpu=True)  			
         total = len(self.bloom_gadgets)
         for i, bloom_gadget in enumerate(self.bloom_gadgets):
             print '[+] ===== checking %d/%d th bloom gadget... =====' % (i, total)
-            #some function should be put in blacklist
+            # some function should be put in blacklist
             if bloom_gadget[1] == 'udp_v6_early_demux':
                 continue
             tmp_state = initial_state.copy()
@@ -719,23 +791,23 @@ class OneShotExploit(object):
             if True:  # TODO check if the current bloom state satisfy our requirement
                 del tmp_state
 
-        #get execution time
+        # get execution time
         current_time = time.time()
         executed_time = current_time-self.start_time_of_symbolic_execution
-        print '[+] symbolic execution of blooming gadget takes up to %f seconds' % executed_time
+        print '[+] symbolic execution of blooming gadget takes up to %f seconds'%(executed_time)
 
-        for good_bloom_gadget in  self.good_bloom_gadget:
+        for good_bloom_gadget in self.good_bloom_gadget:
             print good_bloom_gadget
-        print 'there are %d good bloom gadget verified by symbolic execution'%(len(self.good_bloom_gadget))
+        print 'there are %d good bloom gadget verified by symbolic execution' % (len(self.good_bloom_gadget))
         if not os.path.isfile('good_bloom_gadget.cache'):  # dump bloom gadget
-            with open('good_bloom_gadget.cache','wb') as f:
+            with open('good_bloom_gadget.cache', 'wb') as f:
                 pickle.dump(self.good_bloom_gadget, f, -1)
 
     def enforce_fork_on_bloom(self,state):
         fork_gadget = self.current_forking_gadget
         fork_entry = fork_gadget[0]
         print('='*78)
-        print('Call instruction at:', state.inspect.function_address)
+        print('Call instruction at:',state.inspect.function_address)
         self.reach_current_bloom_site = True
         state.osokplugin.reach_bloom_site=True
         #import IPython; IPython.embed()
@@ -759,11 +831,11 @@ class OneShotExploit(object):
         return
 
     def extract_prologue_call_site_signature(self, state):
-        '''
+        """
         extract the data flow signature e.g., rdx rsi rdi at the indirect call in the prologue function
         :param state: the state
         :return: dict of interested register values
-        '''
+        """
         print '[+] extracting prologue call site signatures...'
         signature = dict()
         signature['rdx'] = state.regs.rdx
@@ -775,16 +847,15 @@ class OneShotExploit(object):
         #import IPython; IPython.embed()
         return signature
 
-
     def get_forking_gadget_entry_and_sites(self, fork_gadget):
-        #entry and first site  and second site
-        return  fork_gadget[0], fork_gadget[2][0][1], fork_gadget[2][1][1]
+        #  return entry and first site  and second site
+        return fork_gadget[0], fork_gadget[2][0][1], fork_gadget[2][1][1]
 
     def enter_fork_callback(self, state):
         self.reach_current_fork_gadget = True
         print colorama.Fore.RED + 'enter fork gadget' + colorama.Style.RESET_ALL
-        #raw_input('con?')
-        #import IPython; IPython.embed()
+        # raw_input('con?')
+        # import IPython; IPython.embed()
         return 
 
     def reach_first_fork_site_callback(self, state):
@@ -796,11 +867,11 @@ class OneShotExploit(object):
         #self.reach_current_first_fork_site = True
         state.osokplugin.reach_first_fork_site = True
         print 'reach first fork site'
-        #check controlled regsiters
+        # check number of controlled regsiters
         try:
             bloomed_regs = self.get_number_of_bloomed_regs(state)
             number_of_bloomed_regs = len(bloomed_regs)
-            print('[+] there are %d controlled regsiters'%(number_of_bloomed_regs))
+            print('[+] there are %d controlled regsiters' % number_of_bloomed_regs)
         except:
             traceback.print_exc()
             raw_input()
@@ -809,8 +880,8 @@ class OneShotExploit(object):
             # we reach first fork site for two consecutive times without reaching second fork site
             print 'found good bloom fork pair'
             constraints = list(state.se.constraints)
-            self.good_bloom_fork_gadget_pair.append([self.current_bloom_gadget,self.current_forking_gadget,constraints \
-                            , list(state.osokplugin.constraints_at_firstly_reached_site) \
+            self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)
+                            , constraints , list(state.osokplugin.constraints_at_firstly_reached_site) \
                             , list(state.osokplugin.history_bbls_to_firstly_reached_fork_site), 3])
             return
 
@@ -823,7 +894,7 @@ class OneShotExploit(object):
         if state.osokplugin.reach_second_fork_site:##TODO we can not pickle state from userhook!!!!
             print 'found good bloom fork pair'
             constraints = list(state.se.constraints)
-            self.good_bloom_fork_gadget_pair.append([self.current_bloom_gadget,self.current_forking_gadget,constraints\
+            self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget), constraints\
                     , list(state.osokplugin.constraints_at_firstly_reached_site)\
                     , list(state.osokplugin.history_bbls_to_firstly_reached_fork_site), 2])
 
@@ -843,7 +914,7 @@ class OneShotExploit(object):
         try:
             bloomed_regs = self.get_number_of_bloomed_regs(state)
             number_of_bloomed_regs = len(bloomed_regs)
-            print('[+] there are %d controlled regsiters'%(number_of_bloomed_regs))
+            print('[+] there are %d controlled registers' % number_of_bloomed_regs)
         except:
             traceback.print_exc()
             raw_input()
@@ -852,12 +923,13 @@ class OneShotExploit(object):
             # we reach second fork site for two consecutive times without reaching first fork site
             print 'found good bloom fork pair'
             constraints = list(state.se.constraints)
-            self.good_bloom_fork_gadget_pair.append([self.current_bloom_gadget, self.current_forking_gadget, constraints \
+            self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)\
+                        , constraints \
                         , list(state.osokplugin.constraints_at_firstly_reached_site) \
                         , list(state.osokplugin.history_bbls_to_firstly_reached_fork_site), 4])
             return
 
-        if state.osokplugin.firstly_reach_first_fork_site == None:
+        if state.osokplugin.firstly_reach_first_fork_site is None:
             # we firstly reach the second fork site
             state.osokplugin.firstly_reach_second_fork_site = True
             state.osokplugin.constraints_at_firstly_reached_site = list(state.se.constraints)
@@ -866,63 +938,54 @@ class OneShotExploit(object):
         if state.osokplugin.reach_first_fork_site:
             print 'found good bloom fork pair'
             constraints = list(state.se.constraints)
-            self.good_bloom_fork_gadget_pair.append([self.current_bloom_gadget, self.current_forking_gadget, constraints\
+            self.good_bloom_fork_gadget_pair.append([list(self.current_bloom_gadget), list(self.current_forking_gadget)\
+                    , constraints\
                     , list(state.osokplugin.constraints_at_firstly_reached_site)\
                     , list(state.osokplugin.history_bbls_to_firstly_reached_fork_site), 1])
         #import IPython; IPython.embed()
         return
 
-    def getInstructionLengthByAddr(self,addr):
+    def getInstructionLengthByAddr(self, addr):
         tmpbb = self.b.factory.block(addr)
-        assert tmpbb.size < 5
+        if tmpbb.size > 5:
+            print 'wtf tmpbb size >  5'
+            import IPython; IPython.embed()
+        # call __x86_indirect_thunk_rax
+        assert tmpbb.size <= 5
         return tmpbb.size
 
-    def instrument_forking_gadget(self, state, bloom_gadget, forking_gadget, bloom_state):
-        '''
-
+    def instrument_forking_gadget(self, state, forking_gadget):
+        """
         :param state:  current execution state
         :param bloom_gadget: bloom gadget
         :param forking_gadget: forking gadget
         :param bloom_state:  old state serilized when step() found a good bloom_state
         :return: None
-        '''
-        bloom_entry, bloom_site = self.get_blooming_gadget_entry_and_site(bloom_gadget)
+        """
         fork_entry, first_fork_site, second_fork_site = self.get_forking_gadget_entry_and_sites(forking_gadget)
-        #the problem here is that when rax is symbolic, mov rax, qword ptr [rax + 0x80] will concretize this shit
-        if self.boost_via_reconstraining_with_old_state: #reconstraining
-            old_constraints  = bloom_state.state.se.constraints
-            for constraint in old_constraints:
-                state.add_constraints(constraint)
+        # the problem here is that when rax is symbolic,
+        # mov rax, qword ptr [rax + 0x80] will concretize this shit
 
-        #init the state plugin to keep track of fork site
+        # init the state plugin to keep track of fork site
         state.register_plugin('osokplugin', angr.state_plugins.OsokPlugin(False, False, False))
+        self.reach_current_bloom_site = True
+        state.osokplugin.reach_bloom_site = True  # we have already reached the bloom site
 
-        #add instrumentation via bp
-        #TODO handle indirect jump such as call rdx
-        #state.inspect.b('exit', when = angr.BP_BEFORE\
-                #, instruction = bloom_site\
-                #, action = self.enforce_fork_on_unintended_bloom)
-        state.inspect.b('call', when = angr.BP_BEFORE\
-                , instruction = bloom_site\
-                , action = self.enforce_fork_on_bloom)
-        state.inspect.b('mem_read', when=angr.BP_BEFORE, action = self.track_reads)   
-        state.inspect.b('mem_write',when=angr.BP_BEFORE, action = self.track_writes)
-        state.inspect.b('instruction', when=angr.BP_BEFORE, instruction = fork_entry\
-                , action = self.enter_fork_callback)
-        #we want to first verify if we can reach both of the forking site, so we should zero out both of the call stubs
+        # add instrumentation via breakpoint
+        # TODO handle indirect jump such as call rdx
+        state.inspect.b('mem_read', when=angr.BP_BEFORE, action=self.track_reads)
+        state.inspect.b('mem_write', when=angr.BP_BEFORE, action=self.track_writes)
+        state.inspect.b('instruction', when=angr.BP_BEFORE, instruction=fork_entry, action=self.enter_fork_callback)
+        # we want to first verify if we can reach both of the forking site,
+        # so we should zero out both of the call stubs
         if not self.b.is_hooked(first_fork_site):
             instSize = self.getInstructionLengthByAddr(first_fork_site)
-            #self.b.hook(first_fork_site, self.do_nothing, instSize)
             self.b.hook(first_fork_site, self.reach_first_fork_site_callback, instSize)
         if not self.b.is_hooked(second_fork_site):
             instSize = self.getInstructionLengthByAddr(second_fork_site)
             self.b.hook(second_fork_site, self.reach_second_fork_site_callback, instSize)
         return
-        #state.inspect.b('instruction', when=angr.BP_BEFORE, instruction = first_fork_site\
-                #, action = self.reach_first_fork_site_callback)
-        #state.inspect.b('instruction', when=angr.BP_BEFORE, instruction = second_fork_site\
-                #, action = self.reach_second_fork_site_callback)
-        
+
     def is_stack_address(self, addr):
         if (addr & 0xffffc90000000000) == 0xffffc90000000000:
             return True
@@ -976,7 +1039,7 @@ class OneShotExploit(object):
             pass
         return [x for x in sub_gadget_entry if x != 0]
 
-    def run_forking_gadget(self, state, good_bloom_gadget, forking_gadget, first_constraint_func = None):
+    def run_forking_gadget(self, state, good_bloom_gadget, forking_gadget):
         '''
         run forking gadget and check whether we could reach both of the fork site
         :param state: initial state
@@ -991,22 +1054,20 @@ class OneShotExploit(object):
         fork_entry, first_fork_site, second_fork_site = self.get_forking_gadget_entry_and_sites(forking_gadget)
         if fork_entry == bloom_entry:
             print('fork gadget and bloom gadget are identical')
-            return #TODO: hahaha
+            return  # TODO: hahaha
 
-        if self.add_forking_instrumentation: #instrumentations
-            self.instrument_forking_gadget(state, bloom_gadget, forking_gadget, bloom_state)
-
-        if first_constraint_func != None:
-            first_constraint_func(state, bloom_entry)
-
-        if self.use_controlled_data_concretization:#use controlled_data_concretization
-            self.add_concretization_strategy_controlled_data(state)
-        #import IPython; IPython.embed()
+        # import IPython; IPython.embed()
+        # enforce the constraint to let the bloom gadget to land at the forking gadget, 233
+        state.add_constraints(state.regs.rip == fork_entry)
+        if not state.satisfiable():
+            print "[-] can not set bloom target to fork gadget"
+            return
 
         self.current_forking_gadget = forking_gadget
+        if self.add_forking_instrumentation:  # instrumentation
+            self.instrument_forking_gadget(state, forking_gadget)
 
         # several flags to manage the current simgr
-        self.reach_current_bloom_site = False
         self.reach_current_fork_gadget = False
         self.reach_current_first_fork_site = False
         self.reach_current_second_fork_site = False
@@ -1016,34 +1077,32 @@ class OneShotExploit(object):
         simgr = b.factory.simgr(state, save_unconstrained=True)
         if self.limit_loop:
             pass
-        self.loop_idx_forking_stage=0
+        self.loop_idx_forking_stage = 0
         #loop_idx = 0
         while True:
             print '[+] ' + str(self.loop_idx_forking_stage) + ' step()'
             self.debug_simgr(simgr)
             try:
                 print 'purge deadend state'
-                simgr.stashes['deadended']=[]
+                simgr.stashes['deadended'] = []
                 print '[*] stepping...'
                 print simgr.stashes
                 simgr.step(stash='active')
                 self.loop_idx_forking_stage += 1
                 print 'inspecting simgr...'
                 simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bad_rip)
-                if self.loop_idx_forking_stage > 7:
-                    simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bloom_unreachable)
-                if self.loop_idx_forking_stage > 12:
+                #if self.loop_idx_forking_stage > 7:
+                    #simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_bloom_unreachable)
+                if self.loop_idx_forking_stage > 5:
                     simgr.move(from_stash='active', to_stash='deadended', filter_func=filter_fork_unreachable)
                 #import IPython; IPython.embed()
             except:
                 print 'wtf simgr error'
                 traceback.print_exc()
-                raw_input()
                 del simgr
                 return
 
-
-            if len(simgr.active)==0 and len(simgr.unconstrained)==0:
+            if len(simgr.active) == 0 and len(simgr.unconstrained) == 0:
                 print('no active and unconstrained states left, wtf..')
                 del simgr
                 return 
@@ -1059,17 +1118,19 @@ class OneShotExploit(object):
                 if self.reach_current_fork_gadget == True:
                     print('reached fork gadget')
 
-            elif self.loop_idx_forking_stage > 7 and not self.reach_current_bloom_site:
-                print('can not reach bloom site in 7 steps, return?')
-                del simgr 
-                return
+            #elif self.loop_idx_forking_stage > 7 and not self.reach_current_bloom_site:
+                #print('can not reach bloom site in 7 steps, return?')
+                #del simgr
+                #return
 
-            if self.loop_idx_forking_stage > 18:
+            if self.loop_idx_forking_stage > 11:
                 print 'reach max bbl number limit, terminating execution'
                 del simgr
                 return
 
-            if simgr.unconstrained:#this is a dirty hack to handle indirect jump because angr does not recognize such indirect jump and set their type to Ijk_Boring :(
+            if simgr.unconstrained:
+                # this is a dirty hack to handle indirect jump because angr does not recognize
+                # such indirect jump and set their type to Ijk_Boring :(
                 # #TODO we can not simply set rip to fork entry!!!!
                 print('[+] found unconstrained states')
                 print('[+] dumping unconstrained states')
@@ -1080,9 +1141,9 @@ class OneShotExploit(object):
                         print('already reached the bloom site, should not get stupid unconstrained state')
                         #import IPython; IPython.embed()
                         print('removing the stupid state')
-                        simgr.move(from_stash='unconstrained', to_stash='deadended',filter_func=lambda s: s == ucstate)
+                        simgr.move(from_stash='unconstrained', to_stash='deadended', filter_func=lambda s: s == ucstate)
                     else:
-                        if ucstate.history.addr == bloom_state.history.addr: #reach the bloom site
+                        if ucstate.history.addr == bloom_state.history.addr:  #reach the bloom site
                             ucstate.osokplugin.reach_bloom_site = True
                             self.reach_current_bloom_site = True
                             print('just reached the bloom site')
@@ -1116,42 +1177,23 @@ class OneShotExploit(object):
         """
         print '[+] multiple runs forking gadget'
         bloom_gadget = good_bloom_gadget[0]
+        bloom_state = good_bloom_gadget[1]
         self.current_bloom_gadget = bloom_gadget
         initial_state = self.get_initial_state(switch_cpu=True)
         total = len(self.fork_gadgets)
-        for i,forking_gadget in enumerate(self.fork_gadgets):
-            if i % 16 != 0:
-                continue
+        for i, forking_gadget in enumerate(self.fork_gadgets):
+            #if i % 16 != 0:
+                #continue
             print '[+] ===== checking %d/%d th forking gadget...=====' % (i, total)
             print forking_gadget
-            tmp_state = initial_state.copy()
-            self.run_forking_gadget(tmp_state, good_bloom_gadget, forking_gadget, \
-                    first_constraint_func = self.first_constraint_func)
+            #import IPython; IPython.embed()
+            tmp_state = bloom_state.copy()
+            self.run_forking_gadget(tmp_state, good_bloom_gadget, forking_gadget)
             fork_entry, first_fork_site, second_fork_site = self.get_forking_gadget_entry_and_sites(forking_gadget)
             # remove hook at forking site
             self.b.unhook(first_fork_site)
             self.b.unhook(second_fork_site)
             del tmp_state
-
-    def normalize_history_bbl_addrs(self, bbl_addrs):
-        """
-        remove some false bbl addrs
-        :param bbl_addrs: bbl_addrs of history
-        :return: new list of bbl_addrs
-        """
-        good_bbl_addrs = []
-        previous_block = None
-        for i, addr in enumerate(bbl_addrs):
-            if i == 0:
-                good_bbl_addrs.append(addr)
-            elif addr in previous_block.instruction_addrs:
-                continue
-            else:
-                good_bbl_addrs.append(addr)
-            block = self.b.factory.block(addr)
-            previous_block = block
-
-        return good_bbl_addrs
 
     def enter_prologue_callback(self, state):
         self.reach_current_prologue_entry = True
@@ -1316,13 +1358,13 @@ class OneShotExploit(object):
         #for constraint in constraints_at_first_fork_site:
         #state.add_constraints(constraint)
 
-        #call breakpoint for first fork site
-        print 'first fork site: %x'%(first_fork_site)
+        # call breakpoint for first fork site
+        print 'first fork site: %x' % (first_fork_site)
         self.first_fork_site_bp = state.inspect.b('call', when = angr.BP_BEFORE \
                                                   , instruction = first_fork_site \
                                                   , action = self.enforce_prologue_on_first_fork)
-        #call breakpoint for disclosure site
-        print 'copy_to_user site: %x'%(disclosure_site)
+        # call breakpoint for disclosure site
+        print 'copy_to_user site: %x' % (disclosure_site)
         state.inspect.b('call', when=angr.BP_BEFORE, instruction = disclosure_site \
                         , action = self.disclosure_site_callback)
         #state.inspect.remove_breakpoint("call", self.first_fork_site_bp)
@@ -1410,7 +1452,7 @@ class OneShotExploit(object):
                     del simgr
                     return
 
-                if self.reach_current_bloom_site == True:  # reach the bloom site
+                if self.reach_current_bloom_site is True:  # reach the bloom site
                     print('reached bloom site')
                     if self.reach_current_prologue_site:  # reach the current prologue site
                         print('reached prologue entry in the step')
@@ -1431,7 +1473,7 @@ class OneShotExploit(object):
                     return
 
                 if simgr.unconstrained:  # has unconstrained states
-                    if self.current_prologue_signature == None:
+                    if self.current_prologue_signature is None:
                         print 'we already found unconstrained states but did not find prologue signatures, wtf...'
                         print 'this should never happen...'
                         import IPython; IPython.embed()
@@ -1478,6 +1520,26 @@ class OneShotExploit(object):
                 pass
                 # TODO
 
+    def normalize_history_bbl_addrs(self, bbl_addrs):
+        """
+        remove some false bbl addrs
+        :param bbl_addrs: bbl_addrs of history
+        :return: new list of bbl_addrs
+        """
+        good_bbl_addrs = []
+        previous_block = None
+        for i, addr in enumerate(bbl_addrs):
+            if i == 0:
+                good_bbl_addrs.append(addr)
+            elif addr in previous_block.instruction_addrs:
+                continue
+            else:
+                good_bbl_addrs.append(addr)
+            block = self.b.factory.block(addr)
+            previous_block = block
+
+        return list(good_bbl_addrs)
+
     def run_symbolic_tracing_to_first_fork_site(self, state, bloom_gadget, forking_gadget, history_bbl_addrs\
                                                 , first_constraint_func=None):
         """
@@ -1491,13 +1553,17 @@ class OneShotExploit(object):
         """
         the_chosen_state = None
         bbl_addrs = list(history_bbl_addrs)
-        bbl_addrs = bbl_addrs[1:]
+        #bbl_addrs = bbl_addrs[1:]
         # normalize_history basic block address to fix stupid bugs
         bbl_addrs = self.normalize_history_bbl_addrs(bbl_addrs)
-        print 'run symbolic tracing to forking site using the following trace:', bbl_addrs
+        print 'run symbolic tracing to forking site using the following trace:',
+        for bbladdr in bbl_addrs:
+            print hex(bbladdr),
+        print ' '
 
-        if first_constraint_func != None:
+        if first_constraint_func is not None:
             bloom_entry, bloom_site = self.get_blooming_gadget_entry_and_site(bloom_gadget)
+            print 'apply first constraint func to bloom entry:', hex(bloom_entry)
             first_constraint_func(state, bloom_entry)
 
         if self.use_controlled_data_concretization:
@@ -1517,16 +1583,20 @@ class OneShotExploit(object):
                     print '[-] no active states left, wtf'
                     #import IPython; IPython.embed()
                 simgr.stashes['deadended'] = []
+                print 'active(before)', simgr.active
                 simgr.step(stash='active')
-                loop_idx += 1
+                print 'active(after)', simgr.active
+                print 'simgr(after)', simgr
+                #import IPython; IPython.embed()
+                #loop_idx += 1
                 for active_state in simgr.stashes['active']:
                     active_state.osoktracing.current_bbl_idx = loop_idx
                 next_expected_bbl_addr = bbl_addrs[loop_idx]
                 print 'next_expected_bbl_addr %x' % (next_expected_bbl_addr)
                 simgr.move(from_stash='active', to_stash='deadended', filter_func=\
                     lambda s: s.addr != s.osoktracing.history_bbl_addrs[s.osoktracing.current_bbl_idx])
-                if simgr.unconstrained: #found unconstrained state
-                    print 'there are %d unconstrained'%(len(simgr.unconstrained))
+                if simgr.unconstrained:  # found unconstrained state
+                    print 'there are %d unconstrained' % (len(simgr.unconstrained))
                     for ucstate in simgr.unconstrained:
                         ucstate.add_constraints(ucstate.regs.rip == next_expected_bbl_addr)
                         if ucstate.satisfiable():
@@ -1536,6 +1606,7 @@ class OneShotExploit(object):
                             print 'unsatisfiable'
                             simgr.move(from_stash='unconstrained', to_stash='deadended',\
                                        filter_func=lambda s: s == ucstate)
+                loop_idx += 1
                 #import IPython; IPython.embed()
             except:
                 print 'wtf simgr error'
@@ -1543,7 +1614,8 @@ class OneShotExploit(object):
                 raw_input()
                 del simgr
                 return
-            if loop_idx == max_loop_idx-1:
+            #if loop_idx == max_loop_idx-1:
+            if loop_idx == max_loop_idx:
                 print'tracing ended...'
                 #import IPython; IPython.embed()
                 try:
@@ -1567,8 +1639,8 @@ class OneShotExploit(object):
         constraints_at_first_fork_site = good_bloom_and_fork_gadget[3]
         history_bbl_addrs = good_bloom_and_fork_gadget[4]
         first_reached_fork_site = good_bloom_and_fork_gadget[5]
-        self.current_bloom_gadget = bloom_gadget#set current bloom gadget
-        self.current_forking_gadget = forking_gadget#set current_forking_gadget
+        self.current_bloom_gadget = bloom_gadget  # set current bloom gadget
+        self.current_forking_gadget = forking_gadget  # set current_forking_gadget
         self.current_firstly_reached_fork_site = first_reached_fork_site
         #initial_state = self.get_initial_state(switch_cpu=True, extra_options=angr.options.AVOID_MULTIVALUED_WRITES)
         #self.initial_state = initial_state
@@ -1583,12 +1655,16 @@ class OneShotExploit(object):
         self.tmp_good_disclosure_state_number = 0
         fork_site_state = None
         trial_number = 0
-        while fork_site_state == None and trial_number < 15:
+        while fork_site_state is None and trial_number < 15:
             tmp_state = initial_state.copy()
             fork_site_state = self.run_symbolic_tracing_to_first_fork_site(tmp_state, bloom_gadget, \
-                forking_gadget, history_bbl_addrs, first_constraint_func = self.first_constraint_func)
+                forking_gadget, history_bbl_addrs, first_constraint_func=self.first_constraint_func)
             del tmp_state
             trial_number += 1
+        if fork_site_state is None:
+            print('failed symbolic tracing attempt')
+            #import IPython; IPython.embed()
+            return
         print 'finished symbolic tracing'
         for i, prologue_disclosure_pair in enumerate(self.prologue_disclosure_pairs):
             print '====== checking %d/%d pair of prologue and disclosure gadget' % (i, \
@@ -1601,7 +1677,9 @@ class OneShotExploit(object):
             #fast path, if we get several states, just return
             if self.fast_path_for_disclosure_state and self.tmp_good_disclosure_state_number > 10:
                 print colorama.Fore.CYAN + 'we already get enough states, just return' + colorama.Style.RESET_ALL
+                del fork_site_state
                 return
+        del fork_site_state
 
     def get_good_disclosure_state_dumps(self):
         mypath = './'
@@ -1733,8 +1811,8 @@ class OneShotExploit(object):
             sub_gadget_entry.append(sub_entry['addr'])
         return sub_gadget_entry
 
-    def run_smash_gadget(self, states, smash_gadget):
-        good_smash_state=[]
+    def run_smash_gadget(self, states, smash_gadget, store_smash_state=True):
+        good_smash_state = []
         self.current_smash_gadget = smash_gadget
         sub_gadget_entry = self.analyze_smash_gadget(self.current_smash_gadget)
         new_states = []
@@ -1755,25 +1833,29 @@ class OneShotExploit(object):
             print active_state
             if self.is_good_smash_site(active_state):
                 print colorama.Fore.RED + 'found good smash state...' + colorama.Style.RESET_ALL
-                good_smash_state.append([active_state.copy(), self.current_bloom_gadget, self.current_forking_gadget\
+                if store_smash_state is True:
+                    good_smash_state.append([active_state.copy(), self.current_bloom_gadget, self.current_forking_gadget\
+                                        , self.current_prologue_gadget, self.current_disclosure_gadget\
+                                        , self.current_smash_gadget])
+                else:
+                    good_smash_state.append([self.current_bloom_gadget, self.current_forking_gadget\
                                         , self.current_prologue_gadget, self.current_disclosure_gadget\
                                         , self.current_smash_gadget])
                 #import IPython; IPython.embed()
 
         del simgr
         del new_states
-        return good_smash_state
+        return list(good_smash_state)
 
-
-    def multiple_runs_smash_gadgets(self, good_disclosure_state):
+    def multiple_runs_smash_gadgets(self, good_disclosure_state, store_smash_state=True):
         """
         iterate over various smash gadget and check if smash requirement can be satisfied
         :param good_disclosure_state:
         :return:
         """
-        #firstly try to explore until the second fork site state.
+        # firstly try to explore until the second fork site state.
         second_fork_site_state = self.explore_state_for_second_fork_site(good_disclosure_state)
-        if second_fork_site_state == None:
+        if second_fork_site_state is None:
             print 'cannot find second fork site'
             return
         else:
@@ -1785,24 +1867,26 @@ class OneShotExploit(object):
                 # currently we do not handle rbp gadgets
                 if smash_gadget[2] != 'rsp':
                     continue
-                good_smash_states = self.run_smash_gadget(second_fork_site_state, smash_gadget)
+                good_smash_states = self.run_smash_gadget(second_fork_site_state, smash_gadget, store_smash_state)
                 if len(good_smash_states) > 0:
-                    self.good_smash_states += good_smash_states
+                    self.good_smash_states += list(good_smash_states)
+                del good_smash_states
         return
 
-    def doit(self):
+    def doit_phase1(self):
         """
-        the wrapper function to be called externally to find instance of one-shot exploitation
+        the wrapper function to be called externally to find combination of bloom gadget and forking
+        gadget that could potentially facilitate the generation of one-shot exploitation
         :return: nothing
         """
-        if not os.path.isfile('good_bloom_gadget.cache'):# have not get good bloom gadget yet
+        if not os.path.isfile('good_bloom_gadget.cache'):  # have not get good bloom gadget yet
             self.multiple_runs_blooming_gadget()
         else:
             with open('good_bloom_gadget.cache','rb') as f:
                 print '[+] loading good bloom gadget'
                 self.good_bloom_gadget = pickle.load(f)
 
-        #import IPython; IPython.embed()
+
         if self.use_precomputed_good_bloom_and_fork_pair:
             if not os.path.isfile('good_bloom_fork_gadget_pair.cache'):
                 print '[!] do not have cached good bloom and fork gadget pair'
@@ -1813,17 +1897,18 @@ class OneShotExploit(object):
                     self.good_bloom_fork_gadget_pair = pickle.load(f)
         else:  # do not use precomputed good bloom and fork pair, compute again
             # if not os.path.isfile('good_bloom_fork_gadget_pair.cache'):
-            for i,good_bloom_gadget in enumerate(self.good_bloom_gadget):
-                if i % 2 == 0:
-                    continue
+            for i, good_bloom_gadget in enumerate(self.good_bloom_gadget):
+                #if i % 2 == 0:
+                    #continue
                 print '[+] ----- checking %d/%d th good bloom gadget' % (i, len(self.good_bloom_gadget))
-                if i == 1:
-                    self.multiple_runs_forking_gadget(good_bloom_gadget)
+                #if i == 1:
+                self.multiple_runs_forking_gadget(good_bloom_gadget)
+                print '[+] ----- currently we have %d bloom and fork pairs' % len(self.good_bloom_fork_gadget_pair)
 
             for good_bloom_fork_gadget_pair in self.good_bloom_fork_gadget_pair:
                 print good_bloom_fork_gadget_pair
             print 'there are %d good bloom gadget and fork pair verified by symbolic execution'\
-                % len(self.good_bloom_fork_gadget_pair)
+                    % (len(self.good_bloom_fork_gadget_pair))
             #raw_input()
 
             with open('good_bloom_fork_gadget_pair.cache', 'wb') as f:
@@ -1833,11 +1918,20 @@ class OneShotExploit(object):
                     pickle.dump(self.good_bloom_fork_gadget_pair, f, -1)
                 pass
 
-        self.prologue_disclosure_pairs = self.get_prologue_disclosure_pairs()
         for good_bloom_and_fork_gadget in self.good_bloom_fork_gadget_pair:
-            print good_bloom_and_fork_gadget
+            print good_bloom_and_fork_gadget[0][1], good_bloom_and_fork_gadget[1][1]
 
         #import IPython; IPython.embed()
+        #return
+
+    def doit_phase2(self):
+        """
+        chaining up the stack overflow and the stack disclosure
+        :return:
+        """
+
+        self.prologue_disclosure_pairs = self.get_prologue_disclosure_pairs()
+        # import IPython; IPython.embed()
         if self.use_precomputed_disclosure_state:
             good_disclosure_state_dump_files = self.get_good_disclosure_state_dumps()
             if len(good_disclosure_state_dump_files) > 0:
@@ -1848,7 +1942,7 @@ class OneShotExploit(object):
                         self.good_disclosure_state += tmp_states
 
         if len(self.good_disclosure_state) == 0:
-            if self.initial_state == None:
+            if self.initial_state is None:
                 initial_state = self.get_initial_state(switch_cpu=True, extra_options=\
                     angr.options.AVOID_MULTIVALUED_WRITES)
                 self.initial_state = initial_state
@@ -1888,7 +1982,7 @@ class OneShotExploit(object):
             if len(self.good_disclosure_state) > 0:
                 print '[+] has %d good disclosure state' % (len(self.good_disclosure_state))
                 for i, good_disclosure_state in enumerate(self.good_disclosure_state):
-                    print '****** checking %d/%d good disclosure states.. *******' % (i+1,
+                    print '****** checking %d/%d good disclosure states.. *******' % (i+1, \
                                                                                       len(self.good_disclosure_state))
                     self.multiple_runs_smash_gadgets(good_disclosure_state)
 
@@ -1899,4 +1993,75 @@ class OneShotExploit(object):
             with open('good_smash_state.cache', 'wb') as f:
                 print '[.] serilizing good smash state'
                 pickle.dump(self.good_smash_states, f, -1)
+        import IPython; IPython.embed()
+
+    def doit_phase2_compact(self, start_bloom_and_fork_pair_idx=0):
+        """
+        chaining up the stack overflow and the stack disclosure
+        :return:
+        """
+        total_good_smash_gadget = 0
+        self.prologue_disclosure_pairs = self.get_prologue_disclosure_pairs()
+        # import IPython; IPython.embed()
+        if self.use_precomputed_disclosure_state:
+            good_disclosure_state_dump_files = self.get_good_disclosure_state_dumps()
+            if len(good_disclosure_state_dump_files) > 0:
+                for good_disclosure_state_dump_file in good_disclosure_state_dump_files:
+                    print 'loading %s from pickle dump' % good_disclosure_state_dump_file
+                    with open(good_disclosure_state_dump_file) as f:
+                        tmp_states = pickle.load(f)
+                        self.good_disclosure_state += tmp_states
+
+        if len(self.good_disclosure_state) == 0:  # do not have deserialized any good disclosure states
+            if self.initial_state is None:
+                initial_state = self.get_initial_state(switch_cpu=True, extra_options=\
+                    angr.options.AVOID_MULTIVALUED_WRITES)
+                self.initial_state = initial_state
+            for i, good_bloom_and_fork_gadget in enumerate(self.good_bloom_fork_gadget_pair):
+                if i < start_bloom_and_fork_pair_idx:
+                    continue  # pass
+                ts = time.time()
+                st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+                print st,
+                print 'Now we have in total %d good smash state' % total_good_smash_gadget
+                print '------ checking %d/%d pair of good bloom and fork gadget' % (i,\
+                    len(self.good_bloom_fork_gadget_pair))
+                self.multiple_runs_prologue_and_disclosure_gadgets(good_bloom_and_fork_gadget)
+                if self.dump_good_disclosure_state_discretely and len(self.good_disclosure_state) > 0:
+                    with open('good_disclosure_state_' + str(i) + '.cache', 'wb') as f:
+                        print 'serilizing good disclosure state for a pair of bloom and fork gadget'
+                        pickle.dump(self.good_disclosure_state, f, -1)
+                if self.explore_smash_gadget:
+                    print '[+] final stage, exploring smash gadget'
+                    del self.good_smash_states
+                    self.good_smash_states = []  # reset
+                    if len(self.good_disclosure_state) > 0:
+                        print '[+] has %d good disclosure state' % (len(self.good_disclosure_state))
+                        for ii, good_disclosure_state in enumerate(self.good_disclosure_state):
+                            print '****** checking %d/%d good disclosure states.. *******' % (ii + 1, \
+                                len(self.good_disclosure_state))
+                            self.multiple_runs_smash_gadgets(good_disclosure_state, store_smash_state=False)
+                            total_good_smash_gadget += len(self.good_smash_states)
+                filename = 'good_smash_gadget_of_good_pair'+str(i)+'.dump'
+                print 'dumping good smash gadgets'
+                with open(filename, 'wb') as f:
+                    pickle.dump(self.good_smash_states, f, -1)
+                for disclosure_state in self.good_disclosure_state:
+                    del disclosure_state
+                del self.good_disclosure_state
+                self.good_disclosure_state = []
+                if self.not_saving_unsatisfiable_states:
+                    for s in self.unsatisfiable_state:
+                        del s
+                    del self.unsatisfiable_state
+                    self.unsatisfiable_state=[]
+                if self.inspect_phase_2:
+                    import IPython; IPython.embed()
+
+        print 'there are %d good_smash_states' % (len(self.good_smash_states))
+        if self.dump_good_smash_state_together:
+            with open('good_smash_state.cache', 'wb') as f:
+                print '[.] serilizing good smash state'
+                pickle.dump(self.good_smash_states, f, -1)
+        print 'end of the whole thing, pop up python shell for you to inspect'
         import IPython; IPython.embed()
